@@ -1,0 +1,16 @@
+{
+  "scripts": {
+    "generate": "ts-node scripts/generate-note.ts"
+  },
+  "dependencies": {
+    "dotenv": "^17.4.0",
+    "openai": "^6.33.0",
+    "slugify": "^1.6.9",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@types/node": "^25.5.2",
+    "ts-node": "^10.9.2",
+    "typescript": "^6.0.2"
+  }
+}
