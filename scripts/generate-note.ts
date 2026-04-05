@@ -7,10 +7,7 @@ import { hideBin } from "yargs/helpers";
 import { toMarkdown } from "../pipelines/markdown.transform";
 import { safeGenerate } from "../pipelines/generate-note.pipeline";
 
-/* -------------------------- */
-/* 🧠 CLI CONFIG              */
-/* -------------------------- */
-
+// CLI config
 const argv = yargs(hideBin(process.argv))
   .option("input", {
     type: "string",
@@ -35,10 +32,6 @@ const argv = yargs(hideBin(process.argv))
   .help()
   .parseSync();
 
-/* -------------------------- */
-/* 🚀 MAIN                    */
-/* -------------------------- */
-
 async function main() {
   const inputPath = path.resolve(argv.input);
 
@@ -62,10 +55,7 @@ async function main() {
 
   const outputPath = path.join(outputDir, fileName);
 
-  /* -------------------------- */
-  /* 📁 FILE STRATEGY           */
-  /* -------------------------- */
-
+  // File strategy
   if (fs.existsSync(outputPath)) {
     if (argv.versioned) {
       const versionedPath = path.join(
@@ -92,10 +82,7 @@ async function main() {
   console.log("Generated:", outputPath);
 }
 
-/* -------------------------- */
-/* ❌ ERROR HANDLING           */
-/* -------------------------- */
-
+// Error handling
 main().catch((err) => {
   console.error("Error:", err);
   process.exit(1);
