@@ -5,8 +5,8 @@ tags:
   - api
   - rate-limiting
   - request-control
-created_at: "2026-04-05T10:12:48.229Z"
-updated_at: "2026-04-05T10:12:48.229Z"
+created_at: "2026-04-05T10:26:42.755Z"
+updated_at: "2026-04-05T10:26:42.755Z"
 ---
 
 ## Summary
@@ -16,13 +16,13 @@ Rate limiting is a technique used to control the number of incoming requests to 
 ## Key Concepts
 
 - Control
-- Incoming Requests
+- Requests
 - Abuse Prevention
 - Fair Usage
 
 ## Deep Dive
 
-Rate limiting helps manage traffic to ensure that no single user can overwhelm the system, thus maintaining performance and availability.
+Rate limiting helps maintain system performance and availability by restricting the number of requests a user can make in a given time frame.
 
 ## Related
 
