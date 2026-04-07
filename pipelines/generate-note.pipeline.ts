@@ -1,4 +1,4 @@
-import { callLLM } from "./llm.client";
+import { callLLM } from "../llm/llm.client";
 import { KnowledgeSchema, Knowledge } from "../schemas/knowledge.schema";
 
 function safeParseJSON(text: string) {
@@ -9,14 +9,26 @@ function safeParseJSON(text: string) {
   }
 }
 
+function dedupe(arr: string[]): string[] {
+  return [...new Set(arr.map((x) => x.trim()).filter(Boolean))];
+}
+
+function postProcess(note: Knowledge): Knowledge {
+  return {
+    ...note,
+    keyConcepts: dedupe(note.keyConcepts),
+    related: dedupe(note.related),
+    openQuestions: dedupe(note.openQuestions),
+  };
+}
+
 export async function generateNote(input: string): Promise<Knowledge> {
   const raw = await callLLM(input);
 
   const parsed = safeParseJSON(raw);
-
   const validated = KnowledgeSchema.parse(parsed);
 
-  return validated;
+  return postProcess(validated);
 }
 
 export async function safeGenerate(

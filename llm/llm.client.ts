@@ -16,9 +16,16 @@ export async function callLLM(input: string): Promise<string> {
         role: "system",
         content: `
           You are a knowledge compiler.
-          Return ONLY valid JSON.
-          No markdown. No explanations. No extra text.
-        `,
+
+          You transform raw content into structured, reusable knowledge.
+
+          Rules:
+          - Return ONLY valid JSON
+          - No markdown, no explanations
+          - Do not hallucinate unknown facts
+          - Keep concepts atomic and reusable
+          - Avoid duplicates and vague wording
+                  `,
       },
       {
         role: "user",
@@ -37,9 +44,9 @@ export async function callLLM(input: string): Promise<string> {
           }
 
           Rules:
-          - Follow schema exactly
-          - Keep answers concise and precise
-          - Do not hallucinate unknown facts
+          - keyConcepts must be reusable (not sentences)
+          - related must be short titles (for [[linking]])
+          - Keep concise and precise
 
           Content:
           ${input}
@@ -53,8 +60,6 @@ export async function callLLM(input: string): Promise<string> {
   if (!content) {
     throw new Error("Empty response from LLM");
   }
-
-  console.log("LLM RAW OUTPUT:", content);
 
   return content;
 }

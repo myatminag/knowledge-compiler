@@ -7,10 +7,7 @@ import type { Root, Content, List, Heading, Paragraph } from "mdast";
 
 import { Knowledge } from "../schemas/knowledge.schema";
 
-/* -------------------------- */
-/* 🔧 Helpers (AST Builders)  */
-/* -------------------------- */
-
+// AST Builders
 function createHeading(text: string): Heading {
   return {
     type: "heading",
@@ -49,10 +46,7 @@ function createList(items: string[], isLink = false): List {
   };
 }
 
-/* -------------------------- */
-/* 🧠 Normalization Layer     */
-/* -------------------------- */
-
+// Normalization Layer
 function normalizeTags(tags: string[]): string[] {
   return tags.map((t) => slugify(t, { lower: true, strict: true }));
 }
@@ -65,10 +59,7 @@ function cleanArray(arr: string[]): string[] {
   return unique(arr.map((x) => x.trim()).filter((x) => x.length > 0));
 }
 
-/* -------------------------- */
-/* 🏗️ Build AST              */
-/* -------------------------- */
-
+// Build AST
 function buildTree(note: Knowledge): Root {
   const children: Content[] = [];
 
@@ -104,10 +95,7 @@ function buildTree(note: Knowledge): Root {
   };
 }
 
-/* -------------------------- */
-/* 📝 Main Export             */
-/* -------------------------- */
-
+// Main Export
 export function toMarkdown(note: Knowledge): {
   content: string;
   fileName: string;

@@ -1,1 +1,1 @@
-Rate limiting is a technique used to control the number of incoming requests to a system. It is commonly used in APIs to prevent abuse and ensure fair usage.
+Edge Rank Algorithm

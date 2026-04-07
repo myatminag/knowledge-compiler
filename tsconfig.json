@@ -6,5 +6,12 @@
     "strict": true,
     "types": ["node"]
   },
-  "include": ["scripts/**/*.ts", "pipelines/**/*.ts", "schemas/**/*.ts"]
+  "include": [
+    "scripts/**/*.ts",
+    "pipelines/**/*.ts",
+    "schemas/**/*.ts",
+    "types/**/*.ts",
+    "llm/llm.client.ts",
+    "cli/generate-note.ts"
+  ]
 }
