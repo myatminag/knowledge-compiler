@@ -15,6 +15,7 @@ import { appendRunLog } from "../utils/runlog";
 import { toMarkdown } from "./markdown.transform";
 import { saveVersion } from "./versions.pipeline";
 import { InputSource } from "../types/input-source";
+import { rebuildIndexIfEnabled } from "./index.pipeline";
 import { safeGenerate } from "./generate-note.pipeline";
 import { Knowledge } from "../schemas/knowledge.schema";
 import { readNoteIfExists, sha256, VaultNote } from "../utils/vault";
@@ -124,6 +125,8 @@ export async function processSource(
     outputPath: finalPath,
   });
 
+  rebuildIndexIfEnabled();
+
   return {
     status: runRefine ? "refined" : "generated",
     path: finalPath,
@@ -144,7 +147,9 @@ interface FlowResult {
   previous: Knowledge | null;
 }
 
-async function generateFlow(normalized: NormalizedDocument): Promise<FlowResult> {
+async function generateFlow(
+  normalized: NormalizedDocument,
+): Promise<FlowResult> {
   if (normalized.content.length <= config.chunk.thresholdChars) {
     const generated = await safeGenerate(normalized.content);
     return {

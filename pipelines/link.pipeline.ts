@@ -1,8 +1,10 @@
 import fs from "fs";
 import matter from "gray-matter";
 
-import { scanVault, VaultNote } from "../utils/vault";
 import { logger } from "../utils/logger";
+import { config } from "../config/config";
+import { scanVault, VaultNote } from "../utils/vault";
+import { parseWikilink, renderWikilinkById } from "../utils/obsidian-link";
 
 const WIKILINK_REGEX = /\[\[([^\]\n]+)\]\]/g;
 const BACKLINKS_SECTION_REGEX = /\n*##\s+Backlinks[\s\S]*$/;
@@ -46,7 +48,8 @@ export function extractWikilinks(body: string): string[] {
   WIKILINK_REGEX.lastIndex = 0;
 
   while ((match = WIKILINK_REGEX.exec(stripped)) !== null) {
-    links.add(match[1].trim());
+    const parsed = parseWikilink(match[0]);
+    if (parsed.target) links.add(parsed.target);
   }
 
   return [...links];
@@ -95,11 +98,13 @@ export interface BacklinkUpdate {
 }
 
 function renderBacklinks(ids: string[], index: LinkIndex): string {
+  const style = config.obsidian.linkStyle;
+
   const items = ids
     .map((id) => {
       const note = index.byId.get(id);
-      const label = note ? note.frontmatter.title : id;
-      return `- [[${label}]]`;
+      const title = note ? note.frontmatter.title : id;
+      return `- ${renderWikilinkById(id, title, style)}`;
     })
     .sort();
 

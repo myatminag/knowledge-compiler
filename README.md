@@ -180,12 +180,108 @@ bun run ingest   --dir ./inbox --concurrency 3
 
 ---
 
+## 🔁 The Karpathy "LLM Wiki" loop (Obsidian-ready)
+
+Inspired by Karpathy's idea of treating a personal knowledge base like a **compiled wiki** instead of a retrieval index, this project ships with a four-step loop that runs entirely on Markdown files in your Obsidian vault.
+
+```
+raw drafts  (00-raw/)
+    │  kc raw-ingest --dir inbox --tags transformers,attention
+    ▼
+LLM compile
+    │  kc compile --topic "transformer architecture" --tags transformers
+    ▼
+topic notes (04-topics/)
+    │  auto-rebuild index.md
+    ▼
+global index (index.md)
+    │  kc audit   (periodic)
+    ▼
+self-heal report (.audits/<ts>.md)
+```
+
+### 1. Drop raw drafts into `00-raw/`
+
+Two modes are supported:
+
+```bash
+# External files (PDF/TXT/MD from anywhere)
+bun run raw-ingest --dir ./inbox --tags transformers,attention
+
+# In-place adoption of files Obsidian Web Clipper dropped into 00-raw/
+bun run raw-ingest --adopt --tags transformers
+```
+
+`raw-ingest` is deterministic and does **not** call the LLM. It writes `00-raw/{slug}.md` with `draft: true`, dedupes by `source_hash`, and merges new tags into existing drafts.
+
+### 2. Compile a topic note from many drafts
+
+```bash
+bun run compile --topic "Transformer Architecture" --tags transformers,attention
+```
+
+This pulls **only** from `00-raw/` files matching the requested tags, synthesizes them into a single `04-topics/{slug}.md` note, adds a `## Sources` section with `[[raw-id|Raw Title]]` wikilinks, and marks each source draft with `compiled_into: [topic-slug]` in its frontmatter. Re-running the command refines the existing topic note instead of overwriting it (pass `--overwrite` to start from scratch).
+
+### 3. Auto-maintained global index
+
+Every time you generate, refine, or compile, `index.md` at the vault root is rebuilt deterministically:
+
+- Topics and notes grouped by primary tag, alphabetically sorted
+- Raw inbox counter
+- Orphan wikilinks section
+- Optional Dataview block (`INDEX_DATAVIEW=true`)
+
+Rebuild on demand:
+
+```bash
+bun run index
+```
+
+### 4. Periodic health check
+
+```bash
+bun run audit            # dry run → .audits/{ts}.md
+bun run audit --apply    # also fix orphan casing and add missing Related links
+```
+
+The auditor is split in two phases:
+
+- **Deterministic**: orphan wikilinks, stale raw drafts (> `AUDIT_STALE_DAYS`, default 14), frontmatter drift, near-duplicate concepts (title match + Jaccard over Key Concepts).
+- **LLM-assisted**: contradictions and missing cross-references between notes that share tags.
+
+Reports use Obsidian callouts (`> [!warning]`, `> [!info]`) and actionable `- [ ]` checklists so you can process them inside Obsidian.
+
+## 🧩 Obsidian compatibility
+
+- **Wikilinks**: emitted as `[[slug|Title]]` so they resolve against filenames even when the title differs from the slug. Override via `OBSIDIAN_LINK_STYLE=alias` to emit bare `[[Title]]` and rely on frontmatter aliases instead.
+- **Aliases**: every note gets `aliases: [Title]` so `[[Title]]` always resolves.
+- **Properties panel**: snake_case keys (`created_at`, `source_url`, `source_hash`, `compiled_into`) render natively in Obsidian's Properties UI.
+- **Callouts**: audit reports and the global index use `> [!info]` / `> [!warning]` blocks.
+- **Web Clipper**: point the Obsidian Web Clipper at `00-raw/` and run `bun run raw-ingest --adopt` to retrofit frontmatter without rewriting the body.
+
+### New config keys
+
+Set these in `.env` to tune the loop:
+
+```bash
+AUDIT_STALE_DAYS=14          # how long a raw can sit before audit flags it
+TOPIC_MAX_SOURCES=40         # safety cap before chunking in compile
+INDEX_AUTO_REBUILD=true      # rebuild index.md after every write
+INDEX_DATAVIEW=false         # include a Dataview codeblock in index.md
+OBSIDIAN_LINK_STYLE=pipe     # pipe | alias
+```
+
+---
+
 ## 🛣️ Roadmap
 
 - [x] Schema validation with zod
 - [x] Auto-linking between knowledge units
 - [x] Incremental refinement pipeline
 - [x] Version diffing and rollback
+- [x] Tagged `00-raw/` inbox + topic compiler (Karpathy loop)
+- [x] Auto-maintained global `index.md`
+- [x] Health-check auditor (orphans, contradictions, stale raw)
 - [ ] Full-text search
 - [ ] Semantic search (optional)
 

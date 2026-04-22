@@ -1,6 +1,7 @@
 import fs from "fs";
 import path from "path";
 import yargs from "yargs";
+import pLimit from "p-limit";
 import { hideBin } from "yargs/helpers";
 
 import {
@@ -11,8 +12,15 @@ import {
 import { logger } from "../utils/logger";
 import { scanVault } from "../utils/vault";
 import { processSource } from "../pipelines/orchestrator";
+import { compileTopic } from "../pipelines/topic.pipeline";
+import { audit } from "../pipelines/audit.pipeline";
+import {
+  rebuildIndex,
+  rebuildIndexIfEnabled,
+} from "../pipelines/index.pipeline";
 import { applyBacklinks } from "../pipelines/link.pipeline";
 import { InputSource, InputType } from "../types/input-source";
+import { adoptRaw, writeRaw } from "../pipelines/raw.pipeline";
 
 async function readInput(
   inputArg: string,
@@ -105,6 +113,157 @@ function runLintVault() {
     invalid: scan.invalid.length,
     issues: totalIssues,
   });
+}
+
+function detectRawType(filename: string): InputType {
+  const ext = path.extname(filename).toLowerCase();
+  if (ext === ".pdf") return "pdf";
+  return "raw_text";
+}
+
+function listRawTargets(dir: string, include: string): string[] {
+  const abs = path.resolve(dir);
+
+  if (!fs.existsSync(abs)) {
+    throw new Error(`Directory not found: ${abs}`);
+  }
+
+  const extensions = include.split(",").map((e) => e.trim().toLowerCase());
+
+  return fs
+    .readdirSync(abs)
+    .map((f) => path.join(abs, f))
+    .filter((p) => fs.statSync(p).isFile())
+    .filter((p) => extensions.includes(path.extname(p).toLowerCase()));
+}
+
+async function runRawIngest(args: {
+  dir?: string;
+  tags: string;
+  include: string;
+  concurrency: number;
+  adopt: boolean;
+  overwrite: boolean;
+}) {
+  const tagList = args.tags
+    .split(",")
+    .map((t) => t.trim())
+    .filter((t) => t.length > 0);
+
+  if (args.adopt) {
+    const result = adoptRaw({ tags: tagList });
+
+    logger.info("Raw adopt complete", {
+      adopted: result.adopted.length,
+      alreadyTagged: result.alreadyTagged.length,
+      invalid: result.invalid.length,
+    });
+
+    for (const bad of result.invalid) logger.error("Adopt failed", bad);
+    return;
+  }
+
+  if (!args.dir) {
+    throw new Error("Either --dir or --adopt is required");
+  }
+
+  const files = listRawTargets(args.dir, args.include);
+
+  logger.info("Raw ingest start", {
+    files: files.length,
+    concurrency: args.concurrency,
+    tags: tagList,
+  });
+
+  const limit = pLimit(args.concurrency);
+
+  const results = await Promise.allSettled(
+    files.map((file) =>
+      limit(async () => {
+        const type = detectRawType(file);
+        const source: InputSource =
+          type === "raw_text"
+            ? { type, content: fs.readFileSync(file, "utf-8") }
+            : { type, content: file };
+
+        const outcome = await writeRaw({
+          source,
+          tags: tagList,
+          overwrite: args.overwrite,
+        });
+
+        logger.info(`${path.basename(file)} -> ${outcome.status}`, {
+          path: outcome.path,
+          id: outcome.id,
+        });
+
+        return outcome;
+      }),
+    ),
+  );
+
+  const failures = results.filter((r) => r.status === "rejected");
+
+  logger.info("Raw ingest complete", {
+    total: files.length,
+    successes: results.length - failures.length,
+    failures: failures.length,
+  });
+
+  for (const f of failures) {
+    if (f.status === "rejected") {
+      logger.error("Raw ingest failure", {
+        reason: f.reason instanceof Error ? f.reason.message : String(f.reason),
+      });
+    }
+  }
+
+  if (failures.length > 0) process.exit(1);
+}
+
+async function runAudit(args: { apply: boolean; skipLlm: boolean }) {
+  const report = await audit({ apply: args.apply, skipLlm: args.skipLlm });
+
+  logger.info("Audit report", {
+    path: report.path,
+    orphans: report.orphans.length,
+    staleRaw: report.staleRaw.length,
+    drift: report.frontmatterDrift.length,
+    nearDuplicates: report.nearDuplicates.length,
+    contradictions: report.contradictions.length,
+    crossrefs: report.crossrefs.length,
+    appliedFixes: report.appliedFixes.length,
+    totalTokens: report.llm.totalTokens,
+  });
+
+  if (args.apply) rebuildIndexIfEnabled();
+}
+
+async function runCompile(args: {
+  topic: string;
+  tags: string;
+  overwrite: boolean;
+}) {
+  const tagList = args.tags
+    .split(",")
+    .map((t) => t.trim())
+    .filter((t) => t.length > 0);
+
+  const outcome = await compileTopic({
+    topic: args.topic,
+    tags: tagList,
+    overwrite: args.overwrite,
+  });
+
+  logger.info(`Topic ${outcome.status}`, {
+    path: outcome.path,
+    id: outcome.id,
+    sources: outcome.sourceCount,
+    tokens: outcome.totalTokens,
+    costUsd: outcome.costUsd,
+  });
+
+  if (outcome.issues.length > 0) logger.warn("Lint issues", outcome.issues);
 }
 
 function runDiff(id: string, limit: number) {
@@ -225,6 +384,64 @@ async function main() {
           .option("id", { type: "string", demandOption: true })
           .option("limit", { type: "number", default: 5 }),
       (args) => runDiff(args.id, args.limit),
+    )
+    .command(
+      "raw-ingest",
+      "Ingest files into 00-raw/ as tagged drafts (no LLM)",
+      (y) =>
+        y
+          .option("dir", { type: "string" })
+          .option("tags", { type: "string", default: "" })
+          .option("include", { type: "string", default: ".txt,.md,.pdf" })
+          .option("concurrency", { type: "number", default: 2 })
+          .option("adopt", { type: "boolean", default: false })
+          .option("overwrite", { type: "boolean", default: false }),
+      (args) =>
+        runRawIngest({
+          dir: args.dir,
+          tags: args.tags,
+          include: args.include,
+          concurrency: args.concurrency,
+          adopt: args.adopt,
+          overwrite: args.overwrite,
+        }),
+    )
+    .command(
+      "compile",
+      "Compile multiple tagged raw drafts into one topic note",
+      (y) =>
+        y
+          .option("topic", { type: "string", demandOption: true })
+          .option("tags", { type: "string", default: "" })
+          .option("overwrite", { type: "boolean", default: false }),
+      (args) =>
+        runCompile({
+          topic: args.topic,
+          tags: args.tags,
+          overwrite: args.overwrite,
+        }),
+    )
+    .command(
+      "index",
+      "Rebuild the global index.md (deterministic, no LLM)",
+      (y) => y,
+      () => {
+        const stats = rebuildIndex();
+        logger.info("Index written", stats);
+      },
+    )
+    .command(
+      "audit",
+      "Run health checks (orphans, stale raw, contradictions) and write a report",
+      (y) =>
+        y
+          .option("apply", { type: "boolean", default: false })
+          .option("skip-llm", { type: "boolean", default: false }),
+      (args) =>
+        runAudit({
+          apply: args.apply,
+          skipLlm: args["skip-llm"] as boolean,
+        }),
     )
     .demandCommand(1)
     .strict()

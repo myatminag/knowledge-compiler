@@ -3,12 +3,26 @@ import path from "path";
 import crypto from "crypto";
 import matter from "gray-matter";
 
+import {
+  Frontmatter,
+  safeParseFrontmatter,
+} from "../schemas/frontmatter.schema";
+import {
+  RawFrontmatter,
+  safeParseRawFrontmatter,
+} from "../schemas/raw-frontmatter.schema";
 import { config } from "../config/config";
-import { Frontmatter, safeParseFrontmatter } from "../schemas/frontmatter.schema";
+import { resolveRawDir } from "./path-resolver";
 
 export interface VaultNote {
   path: string;
   frontmatter: Frontmatter;
+  body: string;
+}
+
+export interface RawNote {
+  path: string;
+  frontmatter: RawFrontmatter;
   body: string;
 }
 
@@ -56,16 +70,47 @@ export interface ScanResult {
 }
 
 export function scanVault(
-  root: string = path.join(config.vault.path, "03-notes"),
+  roots: string | string[] = path.join(config.vault.path, "03-notes"),
 ): ScanResult {
-  const files = walkMarkdown(root);
+  const rootList = Array.isArray(roots) ? roots : [roots];
+  const seen = new Set<string>();
   const notes: VaultNote[] = [];
+  const invalid: { path: string; error: string }[] = [];
+
+  for (const root of rootList) {
+    for (const file of walkMarkdown(root)) {
+      if (seen.has(file)) continue;
+      seen.add(file);
+
+      const raw = fs.readFileSync(file, "utf-8");
+      const parsed = matter(raw);
+      const fm = safeParseFrontmatter(parsed.data);
+
+      if (fm.ok) {
+        notes.push({ path: file, frontmatter: fm.data, body: parsed.content });
+      } else {
+        invalid.push({ path: file, error: fm.error });
+      }
+    }
+  }
+
+  return { notes, invalid };
+}
+
+export interface RawScanResult {
+  notes: RawNote[];
+  invalid: { path: string; error: string }[];
+}
+
+export function scanRaw(root: string = resolveRawDir()): RawScanResult {
+  const files = walkMarkdown(root);
+  const notes: RawNote[] = [];
   const invalid: { path: string; error: string }[] = [];
 
   for (const file of files) {
     const raw = fs.readFileSync(file, "utf-8");
     const parsed = matter(raw);
-    const fm = safeParseFrontmatter(parsed.data);
+    const fm = safeParseRawFrontmatter(parsed.data);
 
     if (fm.ok) {
       notes.push({ path: file, frontmatter: fm.data, body: parsed.content });
@@ -75,4 +120,20 @@ export function scanVault(
   }
 
   return { notes, invalid };
+}
+
+export function readRawIfExists(filePath: string): RawNote | null {
+  if (!fs.existsSync(filePath)) return null;
+
+  const raw = fs.readFileSync(filePath, "utf-8");
+  const parsed = matter(raw);
+
+  const fm = safeParseRawFrontmatter(parsed.data);
+  if (!fm.ok) return null;
+
+  return {
+    path: filePath,
+    frontmatter: fm.data,
+    body: parsed.content,
+  };
 }

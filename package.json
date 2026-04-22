@@ -9,6 +9,10 @@
     "lint-vault": "bun cli/generate-note.ts lint-vault",
     "diff": "bun cli/generate-note.ts diff",
     "ingest": "bun cli/ingest.ts",
+    "raw-ingest": "bun cli/generate-note.ts raw-ingest",
+    "compile": "bun cli/generate-note.ts compile",
+    "index": "bun cli/generate-note.ts index",
+    "audit": "bun cli/generate-note.ts audit",
     "test": "bun test"
   },
   "dependencies": {

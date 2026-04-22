@@ -26,10 +26,15 @@ describe("toMarkdown", () => {
     ]);
   });
 
-  test("renders related as wiki links", () => {
+  test("renders related as Obsidian pipe wiki links", () => {
     const out = toMarkdown(note);
-    expect(out.content).toContain("[[API Gateway]]");
-    expect(out.content).toContain("[[Circuit Breaker]]");
+    expect(out.content).toContain("[[api-gateway|API Gateway]]");
+    expect(out.content).toContain("[[circuit-breaker|Circuit Breaker]]");
+  });
+
+  test("emits aliases so bare [[Title]] links still resolve in Obsidian", () => {
+    const out = toMarkdown(note);
+    expect(out.frontmatter.aliases).toEqual(["Rate Limiting"]);
   });
 
   test("preserves createdAt when provided and bumps updatedAt", () => {

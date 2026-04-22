@@ -25,6 +25,17 @@ const EnvSchema = z.object({
   CHUNK_THRESHOLD_CHARS: z.coerce.number().int().positive().default(12000),
   CHUNK_SIZE_CHARS: z.coerce.number().int().positive().default(8000),
   CHUNK_OVERLAP_CHARS: z.coerce.number().int().nonnegative().default(200),
+  AUDIT_STALE_DAYS: z.coerce.number().int().positive().default(14),
+  TOPIC_MAX_SOURCES: z.coerce.number().int().positive().default(40),
+  INDEX_AUTO_REBUILD: z
+    .string()
+    .optional()
+    .transform((v) => v === undefined || v === "true" || v === "1"),
+  INDEX_DATAVIEW: z
+    .string()
+    .optional()
+    .transform((v) => v === "true" || v === "1"),
+  OBSIDIAN_LINK_STYLE: z.enum(["pipe", "alias"]).default("pipe"),
 });
 
 function loadConfig() {
@@ -65,6 +76,19 @@ function loadConfig() {
       thresholdChars: env.CHUNK_THRESHOLD_CHARS,
       sizeChars: env.CHUNK_SIZE_CHARS,
       overlapChars: env.CHUNK_OVERLAP_CHARS,
+    },
+    audit: {
+      staleDays: env.AUDIT_STALE_DAYS,
+    },
+    topic: {
+      maxSources: env.TOPIC_MAX_SOURCES,
+    },
+    index: {
+      autoRebuild: env.INDEX_AUTO_REBUILD ?? true,
+      dataview: env.INDEX_DATAVIEW ?? false,
+    },
+    obsidian: {
+      linkStyle: env.OBSIDIAN_LINK_STYLE,
     },
   };
 }
