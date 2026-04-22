@@ -9,4 +9,5 @@ export type InputType =
 export interface InputSource {
   type: InputType;
   content: string;
+  title?: string;
 }

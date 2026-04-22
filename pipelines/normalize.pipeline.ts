@@ -28,7 +28,11 @@ export async function normalize(
 ): Promise<NormalizedDocument> {
   switch (input.type) {
     case "raw_text":
-      return { type: "text", title: "manual-input", content: input.content };
+      return {
+        type: "text",
+        title: input.title?.trim() || "manual-input",
+        content: input.content,
+      };
 
     case "url":
       return await normalizeUrl(input.content);

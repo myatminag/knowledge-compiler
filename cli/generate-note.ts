@@ -5,19 +5,19 @@ import pLimit from "p-limit";
 import { hideBin } from "yargs/helpers";
 
 import {
+  rebuildIndex,
+  rebuildIndexIfEnabled,
+} from "../pipelines/index.pipeline";
+import {
   loadVersion,
   listVersions,
   diffKnowledge,
 } from "../pipelines/versions.pipeline";
 import { logger } from "../utils/logger";
 import { scanVault } from "../utils/vault";
+import { audit } from "../pipelines/audit.pipeline";
 import { processSource } from "../pipelines/orchestrator";
 import { compileTopic } from "../pipelines/topic.pipeline";
-import { audit } from "../pipelines/audit.pipeline";
-import {
-  rebuildIndex,
-  rebuildIndexIfEnabled,
-} from "../pipelines/index.pipeline";
 import { applyBacklinks } from "../pipelines/link.pipeline";
 import { InputSource, InputType } from "../types/input-source";
 import { adoptRaw, writeRaw } from "../pipelines/raw.pipeline";
@@ -183,7 +183,11 @@ async function runRawIngest(args: {
         const type = detectRawType(file);
         const source: InputSource =
           type === "raw_text"
-            ? { type, content: fs.readFileSync(file, "utf-8") }
+            ? {
+                type,
+                content: fs.readFileSync(file, "utf-8"),
+                title: path.basename(file, path.extname(file)),
+              }
             : { type, content: file };
 
         const outcome = await writeRaw({
