@@ -135,19 +135,24 @@ This enables:
 ### 1. Install dependencies
 
 ```bash
-npm install
+bun install
 ```
 
 ### 2. Configure environment
 
+Create a `.env` in the project root:
+
 ```bash
 OPENAI_API_KEY=your_api_key
+OPENAI_BASE_URL=https://api.openai.com/v1
+OPENAI_MODEL=gpt-4o-mini
+KNOWLEDGE_VAULT_PATH=/absolute/path/to/your/knowledge-vault
 ```
 
 ### 3. Run the pipeline
 
 ```bash
-npm run generate
+bun run generate --input ./input.txt
 ```
 
 ---
@@ -156,25 +161,33 @@ npm run generate
 
 ```bash
 echo "Rate limiting prevents abuse in distributed systems..." > input.txt
-npm run generate
+bun run generate --input ./input.txt
 ```
 
-Output:
+Output is written under `$KNOWLEDGE_VAULT_PATH/03-notes/...`.
 
-```
-/knowledge/backend/rate-limiting.md
+### Other commands
+
+```bash
+bun run generate --input https://example.com/article --type url
+bun run generate --input ./paper.pdf --type pdf
+bun run refine   --input ./input.txt
+bun run link
+bun run lint-vault
+bun run diff     --id rate-limiting
+bun run ingest   --dir ./inbox --concurrency 3
 ```
 
 ---
 
 ## 🛣️ Roadmap
 
-- [ ] Schema validation with zod
-- [ ] Auto-linking between knowledge units
-- [ ] Incremental refinement pipeline
+- [x] Schema validation with zod
+- [x] Auto-linking between knowledge units
+- [x] Incremental refinement pipeline
+- [x] Version diffing and rollback
 - [ ] Full-text search
 - [ ] Semantic search (optional)
-- [ ] Version diffing and rollback
 
 ---
 

@@ -1,25 +1,36 @@
 {
   "id": "knowledge-wifi",
   "scripts": {
-    "generate": "bun cli/generate-note.ts",
-    "generate:versioned": "bun cli/generate-note.ts --versioned",
-    "generate:overwrite": "bun cli/generate-note.ts --overwrite"
+    "generate": "bun cli/generate-note.ts generate",
+    "generate:versioned": "bun cli/generate-note.ts generate --versioned",
+    "generate:overwrite": "bun cli/generate-note.ts generate --overwrite",
+    "refine": "bun cli/generate-note.ts refine",
+    "link": "bun cli/generate-note.ts link",
+    "lint-vault": "bun cli/generate-note.ts lint-vault",
+    "diff": "bun cli/generate-note.ts diff",
+    "ingest": "bun cli/ingest.ts",
+    "test": "bun test"
   },
   "dependencies": {
     "@mozilla/readability": "^0.6.0",
     "dotenv": "^17.4.0",
+    "fast-xml-parser": "^5.7.1",
     "gray-matter": "^4.0.3",
     "jsdom": "^29.0.2",
     "openai": "^6.33.0",
+    "p-limit": "^7.3.0",
     "remark-gfm": "^4.0.1",
     "remark-parse": "^11.0.0",
     "remark-stringify": "^11.0.0",
     "slugify": "^1.6.9",
     "unified": "^11.0.5",
+    "unpdf": "^1.6.0",
     "yargs": "^18.0.0",
+    "youtube-transcript": "^1.3.0",
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@types/bun": "^1.3.12",
     "@types/jsdom": "^28.0.1",
     "@types/node": "^25.5.2",
     "@types/yargs": "^17.0.35",

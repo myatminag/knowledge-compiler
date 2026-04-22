@@ -1,65 +1,100 @@
-import "dotenv/config";
 import OpenAI from "openai";
+import type { z } from "zod";
+import { zodResponseFormat } from "openai/helpers/zod";
+
+import { logger } from "../utils/logger";
+import { config } from "../config/config";
+import { estimateCostUsd } from "../utils/pricing";
+import { cacheKey, readCache, writeCache } from "../utils/cache";
 
 const client = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-  baseURL: process.env.OPENAI_BASE_URL,
+  apiKey: config.openai.apiKey,
+  baseURL: config.openai.baseUrl,
 });
 
-export async function callLLM(input: string): Promise<string> {
-  const response = await client.chat.completions.create({
-    model: "gpt-4o-mini",
-    temperature: 0,
-    response_format: { type: "json_object" },
+export interface LLMUsage {
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+  costUsd?: number;
+}
+
+export interface LLMResult<T> {
+  data: T;
+  usage: LLMUsage;
+  model: string;
+  cached?: boolean;
+}
+
+export interface CallOptions {
+  systemPrompt: string;
+  userPrompt: string;
+  model?: string;
+  temperature?: number;
+}
+
+interface CacheEntry<T> {
+  data: T;
+  usage: LLMUsage;
+  model: string;
+}
+
+export async function callStructured<TSchema extends z.ZodType>(
+  schema: TSchema,
+  schemaName: string,
+  options: CallOptions,
+): Promise<LLMResult<z.infer<TSchema>>> {
+  const model = options.model ?? config.openai.model;
+  const temperature = options.temperature ?? config.openai.temperature;
+
+  const key = cacheKey({
+    schemaName,
+    systemPrompt: options.systemPrompt,
+    userPrompt: options.userPrompt,
+    model,
+    promptVersion: config.prompt.version,
+    temperature,
+  });
+
+  const cached = readCache<CacheEntry<z.infer<TSchema>>>(key);
+  if (cached) {
+    return {
+      data: cached.data,
+      usage: cached.usage,
+      model: cached.model,
+      cached: true,
+    };
+  }
+
+  const completion = await client.chat.completions.parse({
+    model,
+    temperature,
+    response_format: zodResponseFormat(schema, schemaName),
     messages: [
-      {
-        role: "system",
-        content: `
-          You are a knowledge compiler.
-
-          You transform raw content into structured, reusable knowledge.
-
-          Rules:
-          - Return ONLY valid JSON
-          - No markdown, no explanations
-          - Do not hallucinate unknown facts
-          - Keep concepts atomic and reusable
-          - Avoid duplicates and vague wording
-                  `,
-      },
-      {
-        role: "user",
-        content: `
-          Convert the following content into structured JSON.
-
-          Schema:
-          {
-            title: string,
-            tags: string[],
-            summary: string,
-            keyConcepts: string[],
-            deepDive: string,
-            related: string[],
-            openQuestions: string[]
-          }
-
-          Rules:
-          - keyConcepts must be reusable (not sentences)
-          - related must be short titles (for [[linking]])
-          - Keep concise and precise
-
-          Content:
-          ${input}
-        `,
-      },
+      { role: "system", content: options.systemPrompt.trim() },
+      { role: "user", content: options.userPrompt.trim() },
     ],
   });
 
-  const content = response.choices[0].message.content;
+  const message = completion.choices[0]?.message;
 
-  if (!content) {
-    throw new Error("Empty response from LLM");
-  }
+  if (!message) throw new Error("Empty response from LLM");
+  if (message.refusal) throw new Error(`LLM refused: ${message.refusal}`);
+  if (!message.parsed) throw new Error("LLM did not return parsed content");
 
-  return content;
+  const usage: LLMUsage = {
+    promptTokens: completion.usage?.prompt_tokens ?? 0,
+    completionTokens: completion.usage?.completion_tokens ?? 0,
+    totalTokens: completion.usage?.total_tokens ?? 0,
+  };
+
+  usage.costUsd = estimateCostUsd(model, usage) ?? undefined;
+
+  logger.debug("LLM usage", { model, ...usage });
+
+  const data = message.parsed as z.infer<TSchema>;
+
+  writeCache<CacheEntry<z.infer<TSchema>>>(key, { data, usage, model });
+
+  return { data, usage, model };
 }
