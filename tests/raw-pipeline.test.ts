@@ -19,6 +19,7 @@ beforeAll(async () => {
         apiKey: "test",
         baseUrl: undefined,
         model: "gpt-4o-mini",
+        modelCompile: undefined,
         temperature: 0,
       },
       vault: { path: vault.root },

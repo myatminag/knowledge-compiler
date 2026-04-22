@@ -1,124 +1,115 @@
 import slugify from "slugify";
 import matter from "gray-matter";
-import { unified } from "unified";
-import remarkGfm from "remark-gfm";
-import remarkStringify from "remark-stringify";
-import type { Root, Content, List, Heading, Paragraph } from "mdast";
 
+import {
+  Knowledge,
+  KeyConcept,
+  DeepDiveSection,
+} from "../schemas/knowledge.schema";
 import { config } from "../config/config";
-import { cleanArray } from "../utils/arrays";
-import { Knowledge } from "../schemas/knowledge.schema";
+import { cleanArrayOfObjects, cleanArray } from "../utils/arrays";
 import { renderWikilink, renderWikilinkById } from "../utils/obsidian-link";
 
-function createHeading(text: string): Heading {
-  return {
-    type: "heading",
-    depth: 2,
-    children: [{ type: "text", value: text }],
-  };
-}
-
-function createParagraph(text: string): Paragraph {
-  return {
-    type: "paragraph",
-    children: [{ type: "text", value: text.trim() }],
-  };
-}
-
-function createList(items: string[], isLink = false): List {
-  const style = config.obsidian.linkStyle;
-
-  return {
-    type: "list",
-    ordered: false,
-    spread: false,
-    children: items.map((item) => ({
-      type: "listItem",
-      spread: false,
-      children: [
-        {
-          type: "paragraph",
-          children: [
-            {
-              type: "text",
-              value: isLink ? renderWikilink(item, { style }) : item.trim(),
-            },
-          ],
-        },
-      ],
-    })),
-  };
-}
-
-function createSourceList(
-  sources: { id: string; title: string; sourceUrl?: string }[],
-): List {
-  const style = config.obsidian.linkStyle;
-
-  return {
-    type: "list",
-    ordered: false,
-    spread: false,
-    children: sources.map((src) => ({
-      type: "listItem",
-      spread: false,
-      children: [
-        {
-          type: "paragraph",
-          children: [
-            {
-              type: "text",
-              value: src.sourceUrl
-                ? `${renderWikilinkById(src.id, src.title, style)} — ${src.sourceUrl}`
-                : renderWikilinkById(src.id, src.title, style),
-            },
-          ],
-        },
-      ],
-    })),
-  };
+export interface TopicSource {
+  id: string;
+  title: string;
+  sourceUrl?: string;
 }
 
 function normalizeTags(tags: string[]): string[] {
   return tags.map((t) => slugify(t, { lower: true, strict: true }));
 }
 
-function buildTree(
-  note: Knowledge,
-  sources?: { id: string; title: string; sourceUrl?: string }[],
-): Root {
-  const children: Content[] = [];
+function renderCitations(indexes: number[], sourceCount: number): string {
+  const inRange = [...new Set(indexes)]
+    .filter((i) => Number.isInteger(i) && i >= 0 && i < sourceCount)
+    .sort((a, b) => a - b);
 
-  children.push(createHeading("Summary"));
-  children.push(createParagraph(note.summary));
+  if (inRange.length === 0) return "";
+  return inRange.map((i) => `[^s${i + 1}]`).join("");
+}
+
+function renderConceptBullet(concept: KeyConcept, sourceCount: number): string {
+  const citations = renderCitations(concept.sources, sourceCount);
+  const explanation = concept.explanation.trim();
+  const suffix = citations ? ` ${citations}` : "";
+
+  const headline = `- **${concept.name.trim()}** — ${explanation}${suffix}`;
+
+  const aliases = (concept.aliases ?? [])
+    .map((a) => a.trim())
+    .filter((a) => a.length > 0);
+
+  if (aliases.length === 0) return headline;
+
+  return `${headline}\n  _aliases: ${aliases.join(", ")}_`;
+}
+
+function renderDeepDiveSection(
+  section: DeepDiveSection,
+  sourceCount: number,
+): string {
+  const citations = renderCitations(section.sources, sourceCount);
+  const body = section.body.trim();
+  const heading = `### ${section.heading.trim()}`;
+
+  if (!citations) return `${heading}\n\n${body}`;
+  return `${heading}\n\n${body} ${citations}`;
+}
+
+function renderSourceFootnotes(sources: TopicSource[]): string {
+  const style = config.obsidian.linkStyle;
+
+  return sources
+    .map((src, i) => {
+      const link = renderWikilinkById(src.id, src.title, style);
+      const url = src.sourceUrl ? ` — ${src.sourceUrl}` : "";
+      return `[^s${i + 1}]: ${link}${url}`;
+    })
+    .join("\n");
+}
+
+function renderRelatedList(related: string[]): string {
+  const style = config.obsidian.linkStyle;
+
+  return related.map((r) => `- ${renderWikilink(r, { style })}`).join("\n");
+}
+
+function renderBody(note: Knowledge, sources: TopicSource[]): string {
+  const sourceCount = sources.length;
+  const sections: string[] = [];
+
+  sections.push(`## Summary\n\n${note.summary.trim()}`);
 
   if (note.keyConcepts.length > 0) {
-    children.push(createHeading("Key Concepts"));
-    children.push(createList(note.keyConcepts));
+    const bullets = note.keyConcepts
+      .map((c) => renderConceptBullet(c, sourceCount))
+      .join("\n");
+    sections.push(`## Key Concepts\n\n${bullets}`);
   }
 
-  children.push(createHeading("Deep Dive"));
-  children.push(createParagraph(note.deepDive));
+  if (note.deepDive.length > 0) {
+    const subsections = note.deepDive
+      .map((s) => renderDeepDiveSection(s, sourceCount))
+      .join("\n\n");
+    sections.push(`## Deep Dive\n\n${subsections}`);
+  }
 
   if (note.related.length > 0) {
-    children.push(createHeading("Related"));
-    children.push(createList(note.related, true));
+    sections.push(`## Related\n\n${renderRelatedList(note.related)}`);
   }
 
   if (note.openQuestions.length > 0) {
-    children.push(createHeading("Open Questions"));
-    children.push(createList(note.openQuestions));
+    const bullets = note.openQuestions.map((q) => `- ${q.trim()}`).join("\n");
+    sections.push(`## Open Questions\n\n${bullets}`);
   }
 
-  if (sources && sources.length > 0) {
-    children.push(createHeading("Sources"));
-    children.push(createSourceList(sources));
+  if (sources.length > 0) {
+    const footnotes = renderSourceFootnotes(sources);
+    sections.push(`## Sources\n\n${footnotes}`);
   }
 
-  return {
-    type: "root",
-    children,
-  };
+  return sections.join("\n\n");
 }
 
 export interface ToMarkdownOptions {
@@ -130,7 +121,7 @@ export interface ToMarkdownOptions {
   promptVersion?: string;
   model?: string;
   aliases?: string[];
-  sources?: { id: string; title: string; sourceUrl?: string }[];
+  sources?: TopicSource[];
   extraFrontmatter?: Record<string, unknown>;
 }
 
@@ -156,6 +147,21 @@ function buildAliases(title: string, extra: string[] = []): string[] {
   return result;
 }
 
+function normalizeKnowledge(note: Knowledge): Knowledge {
+  return {
+    ...note,
+    tags: normalizeTags(note.tags),
+    keyConcepts: cleanArrayOfObjects(note.keyConcepts, (c) =>
+      c.name.trim().toLowerCase(),
+    ),
+    deepDive: cleanArrayOfObjects(note.deepDive, (s) =>
+      s.heading.trim().toLowerCase(),
+    ),
+    related: cleanArray(note.related),
+    openQuestions: cleanArray(note.openQuestions),
+  };
+}
+
 export function toMarkdown(
   note: Knowledge,
   options: ToMarkdownOptions = {},
@@ -163,26 +169,10 @@ export function toMarkdown(
   const id = slugify(note.title, { lower: true, strict: true });
   const now = new Date().toISOString();
 
-  const normalized: Knowledge = {
-    ...note,
-    tags: normalizeTags(note.tags),
-    keyConcepts: cleanArray(note.keyConcepts),
-    related: cleanArray(note.related),
-    openQuestions: cleanArray(note.openQuestions),
-  };
+  const normalized = normalizeKnowledge(note);
+  const sources = options.sources ?? [];
 
-  const tree = buildTree(normalized, options.sources);
-
-  const processor = unified().use(remarkGfm).use(remarkStringify, {
-    bullet: "-",
-    listItemIndent: "one",
-    fences: true,
-  });
-
-  const markdownBody = processor
-    .stringify(tree)
-    .replace(/\\\[\\\[/g, "[[")
-    .replace(/\\\]\\\]/g, "]]");
+  const markdownBody = renderBody(normalized, sources).trim();
 
   const aliases = buildAliases(normalized.title, options.aliases ?? []);
 
@@ -207,7 +197,7 @@ export function toMarkdown(
     }
   }
 
-  const final = matter.stringify(markdownBody.trim(), frontmatter);
+  const final = matter.stringify(markdownBody, frontmatter);
 
   return {
     content: final,

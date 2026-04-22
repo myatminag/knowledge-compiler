@@ -17,9 +17,41 @@ const mockKnowledge = {
   tags: ["transformers", "ml"],
   summary:
     "Transformers use self-attention to model sequences without recurrence, scaling well on parallel hardware.",
-  keyConcepts: ["Self-Attention", "Multi-Head Attention", "Positional Encoding"],
-  deepDive:
-    "Transformers consist of encoder and decoder stacks. Each layer combines multi-head attention with feed-forward sublayers, connected by residual paths and layer normalization.",
+  keyConcepts: [
+    {
+      name: "Self-Attention",
+      explanation:
+        "Computes weighted sums across the input sequence so every position attends to every other position.",
+      aliases: [],
+      sources: [0],
+    },
+    {
+      name: "Multi-Head Attention",
+      explanation:
+        "Projects Q, K, V into H subspaces and concatenates outputs to capture diverse relations.",
+      aliases: [],
+      sources: [1],
+    },
+    {
+      name: "Positional Encoding",
+      explanation:
+        "Injects order information into otherwise permutation-invariant attention.",
+      aliases: [],
+      sources: [0],
+    },
+  ],
+  deepDive: [
+    {
+      heading: "Mechanism",
+      body: "Transformers consist of encoder and decoder stacks. Each layer combines multi-head attention with feed-forward sublayers, connected by residual paths and layer normalization.",
+      sources: [0, 1],
+    },
+    {
+      heading: "Variants",
+      body: "Decoder-only stacks power modern LLMs; encoder-only variants such as BERT are used for classification and retrieval tasks.",
+      sources: [1],
+    },
+  ],
   related: ["Attention Mechanism", "Sequence Modeling"],
   openQuestions: ["How do positional schemes scale to long contexts?"],
 };
@@ -39,6 +71,7 @@ beforeAll(async () => {
         apiKey: "test",
         baseUrl: undefined,
         model: "gpt-4o-mini",
+        modelCompile: undefined,
         temperature: 0,
       },
       vault: { path: vault.root },
@@ -64,7 +97,8 @@ beforeAll(async () => {
   await rawPipeline.writeRaw({
     source: {
       type: "raw_text",
-      content: "Self-attention computes weighted sums across the input sequence.",
+      content:
+        "Self-attention computes weighted sums across the input sequence.",
     },
     tags: ["transformers"],
   });

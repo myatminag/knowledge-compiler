@@ -10,7 +10,11 @@ type AuditPipeline = typeof import("../pipelines/audit.pipeline");
 let vault: TmpVault;
 let pipeline: AuditPipeline;
 
-function writeFile(filePath: string, fm: Record<string, unknown>, body: string) {
+function writeFile(
+  filePath: string,
+  fm: Record<string, unknown>,
+  body: string,
+) {
   fs.writeFileSync(filePath, matter.stringify(body, fm));
 }
 
@@ -23,6 +27,7 @@ beforeAll(async () => {
         apiKey: "test",
         baseUrl: undefined,
         model: "gpt-4o-mini",
+        modelCompile: undefined,
         temperature: 0,
       },
       vault: { path: vault.root },
@@ -103,9 +108,9 @@ describe("audit (deterministic only)", () => {
     const report = await pipeline.audit({ skipLlm: true });
 
     expect(report.orphans.length).toBeGreaterThan(0);
-    expect(
-      report.orphans.some((o) => o.target === "nonexistent-target"),
-    ).toBe(true);
+    expect(report.orphans.some((o) => o.target === "nonexistent-target")).toBe(
+      true,
+    );
 
     expect(report.staleRaw.some((s) => s.id === "old-draft")).toBe(true);
     expect(report.staleRaw.some((s) => s.id === "fresh-draft")).toBe(false);

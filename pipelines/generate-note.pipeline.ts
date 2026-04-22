@@ -1,30 +1,47 @@
-import { callStructured, LLMResult } from "../llm/llm.client";
+import {
+  extractVerbatimSnippets,
+  formatVerbatimAppendix,
+} from "../utils/verbatim";
 import { config } from "../config/config";
 import { logger } from "../utils/logger";
-import { cleanArray } from "../utils/arrays";
+import { callStructured, LLMResult } from "../llm/llm.client";
+import { cleanArray, cleanArrayOfObjects } from "../utils/arrays";
 import { KnowledgeSchema, Knowledge } from "../schemas/knowledge.schema";
 
 const SYSTEM_PROMPT = `
-You are a knowledge compiler.
+You are a knowledge compiler that turns raw content into a detailed,
+reference-quality structured note.
 
-You transform raw content into structured, reusable knowledge.
+Targets:
+- 6-12 key concepts. Each is { name, explanation, aliases?, sources }.
+  The explanation MUST be 1-2 sentences, never a bare term.
+- 3-6 Deep Dive sub-sections (e.g. Mechanism, Variants, Trade-offs,
+  Applications, History). Aim for 600-1200 words across sub-sections total.
+- Cite every concept and every Deep Dive sub-section with the 0-indexed
+  \`sources\` array. Since input is a single document, use [0] for every
+  citation.
 
 Rules:
-- Return only the JSON that matches the provided schema.
-- Do not hallucinate facts that are not supported by the source.
-- Keep concepts atomic and reusable (phrases, not sentences).
-- Avoid duplicates and vague wording.
-- Prefer precise, canonical terms over paraphrases.
+- Preserve formulas, equations, pseudocode, and code snippets VERBATIM from
+  the content. Do NOT rewrite or paraphrase them.
+- Merge duplicate concepts and note alternative terminology via \`aliases\`.
+- Never invent facts not supported by the content.
+- Prefer precise, canonical terms; resolve conflicts inside Deep Dive.
+- Return only JSON matching the provided schema.
 `;
 
 function buildUserPrompt(input: string): string {
+  const snippets = extractVerbatimSnippets(input);
+  const appendix = formatVerbatimAppendix(snippets);
+  const suffix = appendix ? `\n\n${appendix}` : "";
+
   return `
-Convert the following content into structured knowledge following the schema.
+Convert the following content into structured knowledge.
 
 Content:
 """
 ${input}
-"""
+"""${suffix}
   `;
 }
 
@@ -46,7 +63,12 @@ function postProcess(note: Knowledge): Knowledge {
   return {
     ...note,
     tags: cleanArray(note.tags),
-    keyConcepts: cleanArray(note.keyConcepts),
+    keyConcepts: cleanArrayOfObjects(note.keyConcepts, (c) =>
+      c.name.trim().toLowerCase(),
+    ),
+    deepDive: cleanArrayOfObjects(note.deepDive, (s) =>
+      s.heading.trim().toLowerCase(),
+    ),
     related: cleanArray(note.related),
     openQuestions: cleanArray(note.openQuestions),
   };

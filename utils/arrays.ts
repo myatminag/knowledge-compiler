@@ -21,3 +21,20 @@ export function dedupeCaseInsensitive(arr: string[]): string[] {
 
   return result;
 }
+
+export function cleanArrayOfObjects<T>(
+  arr: T[],
+  keyFn: (item: T) => string,
+): T[] {
+  const seen = new Set<string>();
+  const result: T[] = [];
+
+  for (const item of arr) {
+    const key = keyFn(item);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    result.push(item);
+  }
+
+  return result;
+}

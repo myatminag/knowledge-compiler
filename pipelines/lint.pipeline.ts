@@ -1,24 +1,26 @@
-import { Knowledge } from "../schemas/knowledge.schema";
+import {
+  Knowledge,
+  KeyConcept,
+  DeepDiveSection,
+} from "../schemas/knowledge.schema";
 
-const MAX_CONCEPT_WORDS = 8;
 const MIN_SUMMARY_LENGTH = 50;
-const MIN_DEEP_DIVE_LENGTH = 100;
+const MIN_DEEP_DIVE_TOTAL_LENGTH = 300;
+const MIN_DEEP_DIVE_SECTIONS = 2;
+const MIN_EXPLANATION_LENGTH = 20;
+const MIN_SECTION_BODY_LENGTH = 80;
+const MIN_KEY_CONCEPTS = 3;
 
-function wordCount(text: string): number {
-  return text
-    .trim()
-    .split(/\s+/)
-    .filter((w) => w.length > 0).length;
+function countBodyChars(sections: DeepDiveSection[]): number {
+  return sections.reduce((acc, s) => acc + s.body.trim().length, 0);
 }
 
-function findCaseInsensitiveDuplicates(arr: string[]): string[] {
+function findDuplicateNames(concepts: KeyConcept[]): string[] {
   const seen = new Map<string, number>();
 
-  for (const item of arr) {
-    const key = item.trim().toLowerCase();
-
+  for (const c of concepts) {
+    const key = c.name.trim().toLowerCase();
     if (!key) continue;
-
     seen.set(key, (seen.get(key) ?? 0) + 1);
   }
 
@@ -27,53 +29,130 @@ function findCaseInsensitiveDuplicates(arr: string[]): string[] {
     .map(([key]) => key);
 }
 
-function isSentenceLike(text: string): boolean {
-  const trimmed = text.trim();
-  if (!trimmed) return false;
+function findDuplicateHeadings(sections: DeepDiveSection[]): string[] {
+  const seen = new Map<string, number>();
 
-  if (wordCount(trimmed) > MAX_CONCEPT_WORDS) return true;
+  for (const s of sections) {
+    const key = s.heading.trim().toLowerCase();
+    if (!key) continue;
+    seen.set(key, (seen.get(key) ?? 0) + 1);
+  }
 
-  return /[.!?]$/.test(trimmed);
+  return [...seen.entries()]
+    .filter(([, count]) => count > 1)
+    .map(([key]) => key);
 }
 
-export function lintNote(note: Knowledge): string[] {
+function findDuplicateStrings(arr: string[]): string[] {
+  const seen = new Map<string, number>();
+
+  for (const item of arr) {
+    const key = item.trim().toLowerCase();
+    if (!key) continue;
+    seen.set(key, (seen.get(key) ?? 0) + 1);
+  }
+
+  return [...seen.entries()]
+    .filter(([, count]) => count > 1)
+    .map(([key]) => key);
+}
+
+export interface LintOptions {
+  sourceCount?: number;
+}
+
+export function lintNote(note: Knowledge, options: LintOptions = {}): string[] {
   const issues: string[] = [];
 
-  if (note.summary.length < MIN_SUMMARY_LENGTH) {
+  if (note.summary.trim().length < MIN_SUMMARY_LENGTH) {
     issues.push(
-      `Summary too short (${note.summary.length} chars, expected >= ${MIN_SUMMARY_LENGTH})`,
+      `Summary too short (${note.summary.trim().length} chars, expected >= ${MIN_SUMMARY_LENGTH})`,
     );
   }
 
-  if (note.deepDive.length < MIN_DEEP_DIVE_LENGTH) {
+  if (note.tags.length === 0) issues.push("Missing tags");
+
+  if (note.keyConcepts.length < MIN_KEY_CONCEPTS) {
     issues.push(
-      `Deep dive too shallow (${note.deepDive.length} chars, expected >= ${MIN_DEEP_DIVE_LENGTH})`,
+      `Too few key concepts (${note.keyConcepts.length}, expected >= ${MIN_KEY_CONCEPTS})`,
     );
   }
 
-  if (note.tags.length === 0) {
-    issues.push("Missing tags");
-  }
-
-  if (note.keyConcepts.length === 0) {
-    issues.push("Missing key concepts");
-  }
-
-  const conceptDupes = findCaseInsensitiveDuplicates(note.keyConcepts);
-  if (conceptDupes.length > 0) {
-    issues.push(`Duplicate key concepts: ${conceptDupes.join(", ")}`);
-  }
-
-  const vagueConcepts = note.keyConcepts.filter(isSentenceLike);
-  if (vagueConcepts.length > 0) {
+  const emptyExplanations = note.keyConcepts.filter(
+    (c) => c.explanation.trim().length < MIN_EXPLANATION_LENGTH,
+  );
+  if (emptyExplanations.length > 0) {
     issues.push(
-      `Sentence-like key concepts (>${MAX_CONCEPT_WORDS} words or ending with punctuation): ${vagueConcepts
+      `Concepts with weak explanations (<${MIN_EXPLANATION_LENGTH} chars): ${emptyExplanations
         .slice(0, 3)
+        .map((c) => c.name)
         .join(" | ")}`,
     );
   }
 
-  const relatedDupes = findCaseInsensitiveDuplicates(note.related);
+  const conceptDupes = findDuplicateNames(note.keyConcepts);
+  if (conceptDupes.length > 0) {
+    issues.push(`Duplicate key concepts: ${conceptDupes.join(", ")}`);
+  }
+
+  if (note.deepDive.length < MIN_DEEP_DIVE_SECTIONS) {
+    issues.push(
+      `Too few deep-dive sub-sections (${note.deepDive.length}, expected >= ${MIN_DEEP_DIVE_SECTIONS})`,
+    );
+  }
+
+  const totalBody = countBodyChars(note.deepDive);
+  if (totalBody < MIN_DEEP_DIVE_TOTAL_LENGTH) {
+    issues.push(
+      `Deep dive too shallow (${totalBody} chars total, expected >= ${MIN_DEEP_DIVE_TOTAL_LENGTH})`,
+    );
+  }
+
+  const shortSections = note.deepDive.filter(
+    (s) => s.body.trim().length < MIN_SECTION_BODY_LENGTH,
+  );
+  if (shortSections.length > 0) {
+    issues.push(
+      `Shallow deep-dive sections: ${shortSections
+        .slice(0, 3)
+        .map((s) => s.heading)
+        .join(" | ")}`,
+    );
+  }
+
+  const headingDupes = findDuplicateHeadings(note.deepDive);
+  if (headingDupes.length > 0) {
+    issues.push(`Duplicate deep-dive headings: ${headingDupes.join(", ")}`);
+  }
+
+  if (options.sourceCount !== undefined && options.sourceCount > 0) {
+    const sourceCount = options.sourceCount;
+
+    const conceptsMissingCitations = note.keyConcepts.filter(
+      (c) => !c.sources || c.sources.length === 0,
+    );
+    if (conceptsMissingCitations.length > 0) {
+      issues.push(
+        `Concepts missing citations: ${conceptsMissingCitations
+          .slice(0, 3)
+          .map((c) => c.name)
+          .join(" | ")}`,
+      );
+    }
+
+    const badIndexes = [
+      ...note.keyConcepts.flatMap((c) => c.sources),
+      ...note.deepDive.flatMap((s) => s.sources),
+    ].filter((i) => !Number.isInteger(i) || i < 0 || i >= sourceCount);
+
+    if (badIndexes.length > 0) {
+      issues.push(
+        `Out-of-range source indexes: ${[...new Set(badIndexes)].join(", ")} (max ${sourceCount - 1})`,
+      );
+    }
+  }
+
+  const relatedDupes = findDuplicateStrings(note.related);
   if (relatedDupes.length > 0) {
     issues.push(`Duplicate related links: ${relatedDupes.join(", ")}`);
   }

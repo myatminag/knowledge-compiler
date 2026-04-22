@@ -1,7 +1,11 @@
 import fs from "fs";
 import path from "path";
 
-import { Knowledge } from "../schemas/knowledge.schema";
+import {
+  Knowledge,
+  KeyConcept,
+  DeepDiveSection,
+} from "../schemas/knowledge.schema";
 import { ensureDir, resolveVersionsDir } from "../utils/path-resolver";
 
 export interface VersionRecord {
@@ -23,7 +27,7 @@ export interface FieldDiff {
 export interface KnowledgeDiffSummary {
   title: { from: string | null; to: string };
   summary: { changed: boolean; from: string | null; to: string };
-  deepDive: { changed: boolean; from: string | null; to: string };
+  deepDive: FieldDiff;
   tags: FieldDiff;
   keyConcepts: FieldDiff;
   related: FieldDiff;
@@ -40,6 +44,14 @@ function arrayDiff(a: string[] = [], b: string[] = []): FieldDiff {
   return { added, removed, changed: added.length > 0 || removed.length > 0 };
 }
 
+function conceptNames(concepts: KeyConcept[] = []): string[] {
+  return concepts.map((c) => c.name);
+}
+
+function sectionHeadings(sections: DeepDiveSection[] = []): string[] {
+  return sections.map((s) => s.heading);
+}
+
 export function diffKnowledge(
   previous: Knowledge | null,
   next: Knowledge,
@@ -51,13 +63,15 @@ export function diffKnowledge(
       to: next.summary,
       changed: previous?.summary !== next.summary,
     },
-    deepDive: {
-      from: previous?.deepDive ?? null,
-      to: next.deepDive,
-      changed: previous?.deepDive !== next.deepDive,
-    },
+    deepDive: arrayDiff(
+      sectionHeadings(previous?.deepDive ?? []),
+      sectionHeadings(next.deepDive),
+    ),
     tags: arrayDiff(previous?.tags ?? [], next.tags),
-    keyConcepts: arrayDiff(previous?.keyConcepts ?? [], next.keyConcepts),
+    keyConcepts: arrayDiff(
+      conceptNames(previous?.keyConcepts ?? []),
+      conceptNames(next.keyConcepts),
+    ),
     related: arrayDiff(previous?.related ?? [], next.related),
     openQuestions: arrayDiff(previous?.openQuestions ?? [], next.openQuestions),
   };

@@ -68,39 +68,76 @@ knowledge-compiler/
 
 ## 🧱 Knowledge Schema
 
-Each knowledge unit follows a strict structure:
+Each knowledge unit is a structured object with **concepts that have explanations**, a **multi-section deep dive**, and **per-claim source citations** that are rendered as footnotes:
 
 ```md
 ---
-id: rate-limiting
-title: Rate Limiting
-tags: [backend, distributed-systems]
+id: transformers
+title: Transformers
+aliases: [Transformers]
+tags: [transformers, ml]
 created_at: YYYY-MM-DD
 updated_at: YYYY-MM-DD
-source: article | pdf | manual
+source_type: topic
+source_count: 3
 ---
 
 ## Summary
 
-...
+Transformers are a neural architecture based on self-attention ...
 
 ## Key Concepts
 
-...
+- **Scaled dot-product attention** — computes `softmax(QK^T / √d_k) V`; the √d_k divisor keeps logits in a stable range for softmax. [^s1]
+- **Multi-head attention** — projects Q, K, V into H subspaces and concatenates outputs so the model can attend to different positions at once. [^s1]
+- **Positional encoding** — injects order information; sinusoidal in the original paper, alternatives include learned absolute, ALiBi, and RoPE. [^s2]
+  _aliases: positional embedding_
 
 ## Deep Dive
 
-...
+### Mechanism
+
+Attention computes a weighted sum over value vectors where weights come from softmax over scaled dot products: `softmax(QK^T / √d_k) V`. [^s1]
+
+### Variants
+
+Rotary (RoPE) rotates Q/K by position-dependent angles; ALiBi adds a linear penalty based on relative distance; both avoid explicit positional embeddings. [^s2]
+
+### Training stability
+
+Pre-LN places LayerNorm inside the residual branch, improving gradient flow over Post-LN especially at scale. [^s3]
 
 ## Related
 
-- [[Token Bucket]]
-- [[Leaky Bucket]]
+- [[attention|Attention]]
 
 ## Open Questions
 
-...
+- How far can context length be extended without quadratic blowup?
+
+## Sources
+
+[^s1]: [[attention-paper|Attention Is All You Need]] — https://arxiv.org/abs/1706.03762
+
+[^s2]: [[rope-paper|RoPE]]
+
+[^s3]: [[pre-ln|Pre-LN Transformer]]
 ```
+
+Under the hood, the schema is:
+
+```ts
+keyConcepts: {
+  (name, explanation, aliases, sources);
+}
+[];
+deepDive: {
+  (heading, body, sources);
+}
+[];
+```
+
+The `sources` arrays are 0-indexed into the list of source excerpts the compiler sees; the renderer emits them as `[^s1]`, `[^s2]`, … footnote citations that link back to the raw drafts.
 
 ---
 
@@ -269,7 +306,10 @@ TOPIC_MAX_SOURCES=40         # safety cap before chunking in compile
 INDEX_AUTO_REBUILD=true      # rebuild index.md after every write
 INDEX_DATAVIEW=false         # include a Dataview codeblock in index.md
 OBSIDIAN_LINK_STYLE=pipe     # pipe | alias
+OPENAI_MODEL_COMPILE=gpt-4o  # optional override — use a stronger model ONLY for `kc compile`
 ```
+
+`OPENAI_MODEL_COMPILE` is scoped to the topic compile step only. Other pipelines (URL/PDF ingestion, refine, audit) continue to use `OPENAI_MODEL` (default `gpt-4o-mini`). This lets you pay for depth where it matters and stay cheap elsewhere.
 
 ---
 

@@ -10,7 +10,12 @@ type IndexPipeline = typeof import("../pipelines/index.pipeline");
 let vault: TmpVault;
 let pipeline: IndexPipeline;
 
-function writeNote(dir: string, name: string, fm: Record<string, unknown>, body: string) {
+function writeNote(
+  dir: string,
+  name: string,
+  fm: Record<string, unknown>,
+  body: string,
+) {
   const file = path.join(dir, name);
   fs.writeFileSync(file, matter.stringify(body, fm));
 }
@@ -24,6 +29,7 @@ beforeAll(async () => {
         apiKey: "test",
         baseUrl: undefined,
         model: "gpt-4o-mini",
+        modelCompile: undefined,
         temperature: 0,
       },
       vault: { path: vault.root },
@@ -126,8 +132,12 @@ describe("rebuildIndex", () => {
 
   test("is idempotent — two rebuilds produce the same body", () => {
     pipeline.rebuildIndex();
-    const first = matter(fs.readFileSync(pipeline.rebuildIndex().path, "utf-8"));
-    const second = matter(fs.readFileSync(pipeline.rebuildIndex().path, "utf-8"));
+    const first = matter(
+      fs.readFileSync(pipeline.rebuildIndex().path, "utf-8"),
+    );
+    const second = matter(
+      fs.readFileSync(pipeline.rebuildIndex().path, "utf-8"),
+    );
 
     expect(second.content).toBe(first.content);
   });

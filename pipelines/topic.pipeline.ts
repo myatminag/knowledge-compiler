@@ -12,52 +12,92 @@ import {
   TopicKnowledge,
   TopicKnowledgeSchema,
 } from "../schemas/topic.schema";
+import {
+  applyDiff,
+  KnowledgeDiff,
+  KnowledgeDiffSchema,
+} from "./refine.pipeline";
+import {
+  cleanArray,
+  cleanArrayOfObjects,
+  dedupeCaseInsensitive,
+} from "../utils/arrays";
+import {
+  Knowledge,
+  KeyConcept,
+  KnowledgeSchema,
+  DeepDiveSection,
+} from "../schemas/knowledge.schema";
+import {
+  extractVerbatimSnippets,
+  formatVerbatimAppendix,
+} from "../utils/verbatim";
 import { logger } from "../utils/logger";
 import { config } from "../config/config";
 import { lintNote } from "./lint.pipeline";
 import { chunkText } from "./chunk.pipeline";
 import { appendRunLog } from "../utils/runlog";
 import { filterRawByTags } from "./raw.pipeline";
-import { rebuildIndexIfEnabled } from "./index.pipeline";
 import { toMarkdown } from "./markdown.transform";
 import { saveVersion } from "./versions.pipeline";
 import { callStructured } from "../llm/llm.client";
+import { rebuildIndexIfEnabled } from "./index.pipeline";
 import { RawNote, readNoteIfExists, sha256 } from "../utils/vault";
-import { KnowledgeDiffSchema, applyDiff } from "./refine.pipeline";
-import { cleanArray, dedupeCaseInsensitive } from "../utils/arrays";
-import { Knowledge, KnowledgeSchema } from "../schemas/knowledge.schema";
 
 const SYNTHESIS_SYSTEM_PROMPT = `
-You are a knowledge compiler that synthesizes MULTIPLE source documents into a single, coherent topic entry.
+You are a knowledge compiler that synthesizes multiple source documents
+into a single, detailed, reference-quality topic entry.
 
-You are given a topic name and several source excerpts. Your job is to:
-- Produce ONE unified structured note that represents the current best understanding of the topic.
-- Merge and deduplicate concepts across sources.
-- Keep concepts atomic (short phrases, not sentences).
-- Prefer precise, canonical terms; resolve terminology conflicts by stating the canonical form and noting alternatives in Deep Dive.
-- Never hallucinate facts not supported by the provided sources.
-- Return only JSON matching the provided schema.
-- Leave "sources" as an empty array; the caller fills it from provenance metadata.
+Targets:
+- 6-12 key concepts. Each is { name, explanation, aliases?, sources }.
+  The explanation MUST be 1-2 sentences, never a bare term.
+- 3-6 Deep Dive sub-sections (e.g. Mechanism, Variants, Trade-offs,
+  Applications, History). Aim for 600-1200 words across sub-sections total.
+- Cite every concept and every Deep Dive sub-section with the 0-indexed
+  \`sources\` array pointing into the provided excerpts ([source 0], [source 1], ...).
+
+Rules:
+- Preserve formulas, equations, pseudocode, and code snippets VERBATIM from
+  the source excerpts. Do NOT rewrite or paraphrase them.
+- Merge duplicate concepts across sources; note alternative terminology via
+  the \`aliases\` field.
+- Never invent facts not supported by the sources.
+- Prefer precise, canonical terms; resolve conflicts in Deep Dive.
+- Leave the top-level \`sources\` metadata as an empty array; the caller
+  fills it from provenance metadata.
 `;
 
 const REFINE_SYSTEM_PROMPT = `
-You are a knowledge refiner for a topic note. Produce a minimal DIFF that improves the existing topic note using new source excerpts.
+You are a knowledge refiner for a topic note. Produce a minimal DIFF that
+improves the existing topic note using new source excerpts.
 
 Rules:
 - Do not drop existing concepts unless clearly superseded.
-- Prefer adding new concepts over rewriting old ones.
-- Keep concepts atomic.
+- Prefer ADDING new concepts over rewriting old ones.
+- Each concept must have \`name\` plus a 1-2 sentence \`explanation\`.
+- To add new sub-sections use \`appendDeepDiveSections\`.
+- To overwrite an existing sub-section (matched by heading, case-insensitive) use \`replaceDeepDiveSections\`.
+- Cite sources via the 0-indexed \`sources\` arrays.
+- Preserve formulas and code VERBATIM from the new content when you reference them.
 - Never hallucinate facts that the new content does not support.
 - Return empty arrays / null when no change is warranted.
 `;
 
 function buildSynthesisPrompt(topic: string, body: string): string {
+  const snippets = extractVerbatimSnippets(body);
+  const appendix = formatVerbatimAppendix(snippets);
+  const suffix = appendix ? `\n\n${appendix}` : "";
+
   return `
 Topic: ${topic}
 
-The following excerpts come from raw source documents in my inbox. Synthesize them into a single structured topic note.
+The following excerpts come from raw source documents in my inbox. They are
+numbered starting at 0 (i.e. [source 0], [source 1], ...). Use those indexes
+when populating the \`sources\` arrays on concepts and deep-dive sections.
 
-${body}
+Synthesize them into a single structured topic note.
+
+${body}${suffix}
   `;
 }
 
@@ -66,6 +106,10 @@ function buildRefinePrompt(
   existing: Knowledge,
   body: string,
 ): string {
+  const snippets = extractVerbatimSnippets(body);
+  const appendix = formatVerbatimAppendix(snippets);
+  const suffix = appendix ? `\n\n${appendix}` : "";
+
   return `
 Topic: ${topic}
 
@@ -74,8 +118,8 @@ Existing topic note:
 ${JSON.stringify(existing, null, 2)}
 """
 
-New source excerpts to incorporate:
-${body}
+New source excerpts to incorporate (numbered starting at 0):
+${body}${suffix}
 
 Produce a diff.
   `;
@@ -87,7 +131,7 @@ function formatSources(raws: RawNote[]): string {
       const url = r.frontmatter.source_url
         ? ` (${r.frontmatter.source_url})`
         : "";
-      return `### [source ${i + 1}] ${r.frontmatter.title}${url}\n\n${r.body.trim()}`;
+      return `### [source ${i}] ${r.frontmatter.title}${url}\n\n${r.body.trim()}`;
     })
     .join("\n\n---\n\n");
 }
@@ -98,45 +142,65 @@ function readExistingTopicAsKnowledge(
   const existing = readNoteIfExists(filePath);
   if (!existing) return null;
 
-  const sections = parseTopicBody(existing.body);
+  try {
+    const sections = parseTopicBody(existing.body);
 
-  const knowledge: TopicKnowledge = {
-    title: existing.frontmatter.title,
-    tags: existing.frontmatter.tags,
-    summary: sections.summary,
-    keyConcepts: sections.keyConcepts,
-    deepDive: sections.deepDive,
-    related: sections.related,
-    openQuestions: sections.openQuestions,
-    sources: sections.sources,
-  };
+    const knowledge: TopicKnowledge = {
+      title: existing.frontmatter.title,
+      tags: existing.frontmatter.tags,
+      summary: sections.summary,
+      keyConcepts: sections.keyConcepts,
+      deepDive: sections.deepDive,
+      related: sections.related,
+      openQuestions: sections.openQuestions,
+      sources: sections.sources,
+    };
 
-  return { knowledge, createdAt: existing.frontmatter.created_at };
+    const parsed = TopicKnowledgeSchema.safeParse(knowledge);
+    if (!parsed.success) {
+      logger.warn("Existing topic note failed schema parse; regenerating", {
+        path: filePath,
+        issues: parsed.error.issues.slice(0, 3),
+      });
+      return null;
+    }
+
+    return {
+      knowledge: parsed.data,
+      createdAt: existing.frontmatter.created_at,
+    };
+  } catch (err) {
+    logger.warn("Failed to parse existing topic note; regenerating", {
+      path: filePath,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return null;
+  }
 }
 
 interface ParsedTopicSections {
   summary: string;
-  keyConcepts: string[];
-  deepDive: string;
+  keyConcepts: KeyConcept[];
+  deepDive: DeepDiveSection[];
   related: string[];
   openQuestions: string[];
   sources: TopicSource[];
 }
 
 function parseTopicBody(body: string): ParsedTopicSections {
-  const sections = splitBySections(body);
+  const sections = splitByH2(body);
 
   return {
-    summary: sections.Summary ?? "",
-    keyConcepts: parseBulletList(sections["Key Concepts"] ?? ""),
-    deepDive: sections["Deep Dive"] ?? "",
+    summary: (sections.Summary ?? "").trim(),
+    keyConcepts: parseConceptBullets(sections["Key Concepts"] ?? ""),
+    deepDive: parseDeepDive(sections["Deep Dive"] ?? ""),
     related: parseBulletList(sections.Related ?? "").map(stripWikilinkSyntax),
     openQuestions: parseBulletList(sections["Open Questions"] ?? ""),
-    sources: parseSources(sections.Sources ?? ""),
+    sources: parseSourceFootnotes(sections.Sources ?? ""),
   };
 }
 
-function splitBySections(body: string): Record<string, string> {
+function splitByH2(body: string): Record<string, string> {
   const result: Record<string, string> = {};
   const lines = body.split("\n");
 
@@ -150,10 +214,10 @@ function splitBySections(body: string): Record<string, string> {
   };
 
   for (const line of lines) {
-    const headingMatch = line.match(/^##\s+(.+?)\s*$/);
-    if (headingMatch) {
+    const match = line.match(/^##\s+(.+?)\s*$/);
+    if (match) {
       flush();
-      currentHeading = headingMatch[1].trim();
+      currentHeading = match[1].trim();
       buffer = [];
       continue;
     }
@@ -169,7 +233,7 @@ function parseBulletList(section: string): string[] {
   return section
     .split("\n")
     .map((l) => l.trim())
-    .filter((l) => l.startsWith("-"))
+    .filter((l) => l.startsWith("- "))
     .map((l) => l.replace(/^-\s*/, "").trim())
     .filter((l) => l.length > 0);
 }
@@ -180,29 +244,141 @@ function stripWikilinkSyntax(value: string): string {
   return (parts[1] ?? parts[0]).trim();
 }
 
-function parseSources(section: string): TopicSource[] {
-  return parseBulletList(section)
-    .map((line) => {
-      const urlMatch = line.match(/—\s*(https?:\S+)/);
-      const sourceUrl = urlMatch?.[1];
-      const linkPart = line.replace(/—\s*https?:\S+/, "").trim();
-      const wikilink = linkPart.match(/\[\[([^\]]+)\]\]/);
-      if (!wikilink) return null;
-
-      const inside = wikilink[1];
-      const [id, title] = inside.includes("|")
-        ? inside.split("|").map((s) => s.trim())
-        : [inside.trim(), inside.trim()];
-
-      if (!id) return null;
-
-      return {
-        id,
-        title: title || id,
-        sourceUrl,
-      } as TopicSource;
+function extractCitationIndexes(text: string): number[] {
+  const matches = text.match(/\[\^s(\d+)\]/g) ?? [];
+  return matches
+    .map((m) => {
+      const n = parseInt(m.match(/\d+/)?.[0] ?? "0", 10);
+      return n - 1;
     })
-    .filter((s): s is TopicSource => s !== null);
+    .filter((n) => Number.isInteger(n) && n >= 0);
+}
+
+function stripCitations(text: string): string {
+  return text.replace(/\s*\[\^s\d+\]/g, "").trim();
+}
+
+function parseConceptBullets(section: string): KeyConcept[] {
+  const lines = section.split("\n");
+  const concepts: KeyConcept[] = [];
+  let current: { raw: string; aliasLine?: string } | null = null;
+
+  const flush = () => {
+    if (!current) return;
+    const parsed = parseConceptLine(current.raw, current.aliasLine);
+    if (parsed) concepts.push(parsed);
+    current = null;
+  };
+
+  for (const line of lines) {
+    if (/^-\s+\*\*/.test(line)) {
+      flush();
+      current = { raw: line.trim() };
+    } else if (current && /^\s+_aliases:/.test(line)) {
+      current.aliasLine = line.trim();
+    } else if (current && line.trim().length > 0 && !/^-\s/.test(line)) {
+      current.raw = `${current.raw} ${line.trim()}`;
+    }
+  }
+
+  flush();
+  return concepts;
+}
+
+function parseConceptLine(
+  raw: string,
+  aliasLine: string | undefined,
+): KeyConcept | null {
+  const match = raw.match(/^-\s+\*\*(.+?)\*\*\s*[—-]\s*(.+)$/);
+  if (!match) return null;
+
+  const name = match[1].trim();
+  const rest = match[2];
+
+  const sources = extractCitationIndexes(rest);
+  const explanation = stripCitations(rest);
+
+  let aliases: string[] = [];
+  if (aliasLine) {
+    const aliasMatch = aliasLine.match(/_aliases:\s*(.+)_/);
+    if (aliasMatch) {
+      aliases = aliasMatch[1]
+        .split(",")
+        .map((a) => a.trim())
+        .filter((a) => a.length > 0);
+    }
+  }
+
+  return { name, explanation, aliases, sources };
+}
+
+function parseDeepDive(section: string): DeepDiveSection[] {
+  const lines = section.split("\n");
+  const sections: DeepDiveSection[] = [];
+  let currentHeading: string | null = null;
+  let buffer: string[] = [];
+
+  const flush = () => {
+    if (currentHeading === null) return;
+    const rawBody = buffer.join("\n").trim();
+    if (!rawBody) {
+      currentHeading = null;
+      buffer = [];
+      return;
+    }
+    const sources = extractCitationIndexes(rawBody);
+    const body = stripCitations(rawBody);
+    sections.push({ heading: currentHeading, body, sources });
+    currentHeading = null;
+    buffer = [];
+  };
+
+  for (const line of lines) {
+    const match = line.match(/^###\s+(.+?)\s*$/);
+    if (match) {
+      flush();
+      currentHeading = match[1].trim();
+      continue;
+    }
+    if (currentHeading !== null) buffer.push(line);
+  }
+
+  flush();
+  return sections;
+}
+
+function parseSourceFootnotes(section: string): TopicSource[] {
+  const result: TopicSource[] = [];
+
+  for (const line of section.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+
+    const match = trimmed.match(/^\[\^s\d+\]:\s*(.+)$/);
+    if (!match) continue;
+
+    const rest = match[1];
+    const [linkPart, urlPartRaw] = rest.split(" — ");
+    const sourceUrl = urlPartRaw?.trim();
+
+    const wikilink = (linkPart ?? "").match(/\[\[([^\]]+)\]\]/);
+    if (!wikilink) continue;
+
+    const inside = wikilink[1];
+    const [id, title] = inside.includes("|")
+      ? inside.split("|").map((s) => s.trim())
+      : [inside.trim(), inside.trim()];
+
+    if (!id) continue;
+
+    result.push({
+      id,
+      title: title || id,
+      sourceUrl: sourceUrl || undefined,
+    });
+  }
+
+  return result;
 }
 
 export interface TopicCompileOptions {
@@ -219,6 +395,10 @@ export interface TopicCompileOutcome {
   issues: string[];
   totalTokens: number;
   costUsd?: number;
+}
+
+function compileModel(): string | undefined {
+  return config.openai.modelCompile;
 }
 
 async function synthesizeFromScratch(
@@ -243,6 +423,7 @@ async function synthesizeFromScratch(
   const first = await callStructured(KnowledgeSchema, "topic_knowledge", {
     systemPrompt: SYNTHESIS_SYSTEM_PROMPT,
     userPrompt: buildSynthesisPrompt(topic, chunks[0]),
+    model: compileModel(),
   });
 
   let knowledge: Knowledge = first.data;
@@ -263,6 +444,7 @@ async function synthesizeFromScratch(
       {
         systemPrompt: REFINE_SYSTEM_PROMPT,
         userPrompt: buildRefinePrompt(topic, knowledge, chunks[i]),
+        model: compileModel(),
       },
     );
 
@@ -302,10 +484,11 @@ async function refineExisting(
       {
         systemPrompt: REFINE_SYSTEM_PROMPT,
         userPrompt: buildRefinePrompt(topic, knowledge, chunk),
+        model: compileModel(),
       },
     );
 
-    knowledge = applyDiff(knowledge, result.data);
+    knowledge = applyDiff(knowledge, result.data as KnowledgeDiff);
     model = result.model;
     totalTokens += result.usage.totalTokens;
     totalCost += result.usage.costUsd ?? 0;
@@ -382,11 +565,12 @@ export async function compileTopic(
 
   ensureDir(topicPath);
 
-  const existingFile = fs.existsSync(topicPath)
-    ? readExistingTopicAsKnowledge(topicPath)
-    : null;
+  const existingFile =
+    !options.overwrite && fs.existsSync(topicPath)
+      ? readExistingTopicAsKnowledge(topicPath)
+      : null;
 
-  const runRefine = !!existingFile && !options.overwrite;
+  const runRefine = !!existingFile;
 
   let knowledge: Knowledge;
   let model: string;
@@ -414,9 +598,7 @@ export async function compileTopic(
 
   const sourcesMap = new Map<string, TopicSource>();
 
-  for (const src of existingSources) {
-    sourcesMap.set(src.id, src);
-  }
+  for (const src of existingSources) sourcesMap.set(src.id, src);
 
   for (const raw of limitedRaws) {
     sourcesMap.set(raw.frontmatter.id, {
@@ -431,14 +613,19 @@ export async function compileTopic(
   const topicKnowledge: TopicKnowledge = {
     ...knowledge,
     tags: dedupeCaseInsensitive([...knowledge.tags, ...candidateTags]),
-    keyConcepts: cleanArray(knowledge.keyConcepts),
+    keyConcepts: cleanArrayOfObjects(knowledge.keyConcepts, (c) =>
+      c.name.trim().toLowerCase(),
+    ),
+    deepDive: cleanArrayOfObjects(knowledge.deepDive, (s) =>
+      s.heading.trim().toLowerCase(),
+    ),
     related: cleanArray(knowledge.related),
     openQuestions: cleanArray(knowledge.openQuestions),
     sources,
   };
 
   const validated = TopicKnowledgeSchema.parse(topicKnowledge);
-  const issues = lintNote(validated);
+  const issues = lintNote(validated, { sourceCount: limitedRaws.length });
 
   const sourceHash = sha256(body);
 

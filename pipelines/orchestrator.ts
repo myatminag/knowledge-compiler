@@ -208,7 +208,7 @@ async function refineFlow(
     tags: existing.frontmatter.tags,
     summary: "",
     keyConcepts: [],
-    deepDive: "",
+    deepDive: [],
     related: [],
     openQuestions: [],
   };

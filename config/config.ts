@@ -8,6 +8,7 @@ const EnvSchema = z.object({
   OPENAI_API_KEY: z.string().min(1, "OPENAI_API_KEY is required"),
   OPENAI_BASE_URL: z.string().url().optional(),
   OPENAI_MODEL: z.string().default("gpt-4o-mini"),
+  OPENAI_MODEL_COMPILE: z.string().optional(),
   OPENAI_TEMPERATURE: z.coerce.number().min(0).max(2).default(0),
   KNOWLEDGE_VAULT_PATH: z
     .string()
@@ -54,6 +55,7 @@ function loadConfig() {
       apiKey: env.OPENAI_API_KEY,
       baseUrl: env.OPENAI_BASE_URL,
       model: env.OPENAI_MODEL,
+      modelCompile: env.OPENAI_MODEL_COMPILE,
       temperature: env.OPENAI_TEMPERATURE,
     },
     vault: {
