@@ -1,183 +1,56 @@
 # Knowledge Compiler
 
-> A system that transforms unstructured information into structured, evolving knowledge assets using LLMs.
+Knowledge Compiler turns unstructured sources into structured, versioned Markdown knowledge assets for an Obsidian-compatible vault.
 
----
+It is a local-first Bun and TypeScript CLI for building a compiled knowledge base: ingest raw material, normalize it, generate schema-validated notes with an LLM, maintain links and indexes, and keep audit/version metadata alongside the vault.
 
-## 🧠 Overview
+## What It Does
 
-Knowledge Compiler is a deterministic pipeline that converts raw content (articles, notes, PDFs) into structured Markdown-based knowledge units.
+- Converts raw text, URLs, PDFs, YouTube transcripts, GitHub repositories, and RSS feeds into structured Markdown notes.
+- Uses Zod schemas and OpenAI structured outputs instead of freeform Markdown generation.
+- Writes durable notes, topic notes, raw drafts, run logs, versions, indexes, and audit reports to a local vault.
+- Supports an Obsidian-friendly workflow with wikilinks, aliases, backlinks, callouts, and properties.
+- Lets raw drafts accumulate in `00-raw/`, then compiles tagged groups into stable topic notes in `04-topics/`.
 
-Instead of ephemeral AI outputs, this system produces **persistent, versioned, and continuously improving knowledge**.
+## Core Principles
 
-The system is designed as a **headless knowledge engine**, with tools like Obsidian acting as the visualization layer.
+- Structured output over freeform generation.
+- Markdown files as the source of truth.
+- Deterministic local workflows where possible.
+- Small composable pipelines instead of a heavyweight RAG stack.
+- Incremental refinement, versioning, linking, and auditability over time.
 
----
+## How It Works
 
-## 🎯 Core Principles
-
-- **Structured over freeform** — every output follows a strict schema
-- **Deterministic pipelines** — no ad-hoc prompting
-- **Markdown as source of truth** — portable, versionable, and human-readable
-- **Composable system** — simple primitives over complex infrastructure
-- **Incremental refinement** — knowledge improves over time
-
----
-
-## ⚙️ Architecture
-
-```
-Input Sources → LLM Processing → Structured Markdown → Retrieval & Refinement
-```
-
-### Components
-
-- **Input Layer**
-  - Raw text, PDFs, notes, articles
-
-- **Processing Layer**
-  - LLM transforms input into structured knowledge units
-
-- **Storage Layer**
-  - Markdown files (`/knowledge`) as the source of truth
-
-- **Consumption Layer**
-  - Obsidian or any Markdown-compatible viewer
-
-- **Refinement Layer (future)**
-  - Improves, links, and updates existing knowledge
-
----
-
-## 📁 Project Structure
-
-```
-knowledge-compiler/
-│
-├── knowledge/        # Compiled knowledge (Markdown files / Obsidian vault)
-│   ├── backend/
-│
-├── pipelines/        # LLM processing logic
-├── schemas/          # Knowledge contracts (zod / types)
-├── scripts/          # CLI / execution scripts
-│
-├── README.md
+```text
+Input source
+  -> Normalize to plain text
+  -> Generate or refine structured knowledge with an LLM
+  -> Validate with Zod and lint rules
+  -> Render Markdown with frontmatter and wikilinks
+  -> Write to the vault
+  -> Rebuild index, save versions, and append run logs
 ```
 
----
+The raw-to-topic loop follows a similar path, but starts with deterministic raw ingestion:
 
-## 🧱 Knowledge Schema
-
-Each knowledge unit is a structured object with **concepts that have explanations**, a **multi-section deep dive**, and **per-claim source citations** that are rendered as footnotes:
-
-```md
----
-id: transformers
-title: Transformers
-aliases: [Transformers]
-tags: [transformers, ml]
-created_at: YYYY-MM-DD
-updated_at: YYYY-MM-DD
-source_type: topic
-source_count: 3
----
-
-## Summary
-
-Transformers are a neural architecture based on self-attention ...
-
-## Key Concepts
-
-- **Scaled dot-product attention** — computes `softmax(QK^T / √d_k) V`; the √d_k divisor keeps logits in a stable range for softmax. [^s1]
-- **Multi-head attention** — projects Q, K, V into H subspaces and concatenates outputs so the model can attend to different positions at once. [^s1]
-- **Positional encoding** — injects order information; sinusoidal in the original paper, alternatives include learned absolute, ALiBi, and RoPE. [^s2]
-  _aliases: positional embedding_
-
-## Deep Dive
-
-### Mechanism
-
-Attention computes a weighted sum over value vectors where weights come from softmax over scaled dot products: `softmax(QK^T / √d_k) V`. [^s1]
-
-### Variants
-
-Rotary (RoPE) rotates Q/K by position-dependent angles; ALiBi adds a linear penalty based on relative distance; both avoid explicit positional embeddings. [^s2]
-
-### Training stability
-
-Pre-LN places LayerNorm inside the residual branch, improving gradient flow over Post-LN especially at scale. [^s3]
-
-## Related
-
-- [[attention|Attention]]
-
-## Open Questions
-
-- How far can context length be extended without quadratic blowup?
-
-## Sources
-
-[^s1]: [[attention-paper|Attention Is All You Need]] — https://arxiv.org/abs/1706.03762
-
-[^s2]: [[rope-paper|RoPE]]
-
-[^s3]: [[pre-ln|Pre-LN Transformer]]
+```text
+00-raw/ drafts
+  -> compile by topic and tags
+  -> 04-topics/ topic note
+  -> index.md
+  -> .audits/ health reports
 ```
 
-Under the hood, the schema is:
+## Quick Start
 
-```ts
-keyConcepts: {
-  (name, explanation, aliases, sources);
-}
-[];
-deepDive: {
-  (heading, body, sources);
-}
-[];
-```
-
-The `sources` arrays are 0-indexed into the list of source excerpts the compiler sees; the renderer emits them as `[^s1]`, `[^s2]`, … footnote citations that link back to the raw drafts.
-
----
-
-## 🧠 Knowledge Model
-
-The system treats each Markdown file as a **node in a knowledge graph**:
-
-- Files → nodes
-- `[[links]]` → edges
-- Tags → semantic grouping
-
-This enables:
-
-- Graph-based navigation (via Obsidian)
-- Context-aware refinement
-- Future semantic retrieval
-
----
-
-## 🔄 Pipeline Flow
-
-1. Read raw input
-2. Send to LLM with structured prompt
-3. Validate output format
-4. Save as Markdown file
-5. (Future) Refine and link with existing knowledge
-
----
-
-## 🚀 Getting Started
-
-### 1. Install dependencies
+Install dependencies:
 
 ```bash
 bun install
 ```
 
-### 2. Configure environment
-
-Create a `.env` in the project root:
+Create a `.env` file:
 
 ```bash
 OPENAI_API_KEY=your_api_key
@@ -186,153 +59,102 @@ OPENAI_MODEL=gpt-4o-mini
 KNOWLEDGE_VAULT_PATH=/absolute/path/to/your/knowledge-vault
 ```
 
-### 3. Run the pipeline
+Generate a note from a text file:
 
 ```bash
-bun run generate --input ./input.txt
-```
-
----
-
-## 🧪 Example Workflow
-
-```bash
-echo "Rate limiting prevents abuse in distributed systems..." > input.txt
+echo "Rate limiting prevents abuse in distributed systems." > input.txt
 bun run generate --input ./input.txt
 ```
 
 Output is written under `$KNOWLEDGE_VAULT_PATH/03-notes/...`.
 
-### Other commands
+## Common Workflows
+
+Generate notes from different source types:
 
 ```bash
 bun run generate --input https://example.com/article --type url
 bun run generate --input ./paper.pdf --type pdf
-bun run refine   --input ./input.txt
-bun run link
-bun run lint-vault
-bun run diff     --id rate-limiting
-bun run ingest   --dir ./inbox --concurrency 3
+bun run generate --input https://youtube.com/watch?v=abc123 --type youtube
+bun run generate --input owner/repo --type github_repo
 ```
 
----
-
-## 🔁 The Karpathy "LLM Wiki" loop (Obsidian-ready)
-
-Inspired by Karpathy's idea of treating a personal knowledge base like a **compiled wiki** instead of a retrieval index, this project ships with a four-step loop that runs entirely on Markdown files in your Obsidian vault.
-
-```
-raw drafts  (00-raw/)
-    │  kc raw-ingest --dir inbox --tags transformers,attention
-    ▼
-LLM compile
-    │  kc compile --topic "transformer architecture" --tags transformers
-    ▼
-topic notes (04-topics/)
-    │  auto-rebuild index.md
-    ▼
-global index (index.md)
-    │  kc audit   (periodic)
-    ▼
-self-heal report (.audits/<ts>.md)
-```
-
-### 1. Drop raw drafts into `00-raw/`
-
-Two modes are supported:
+Ingest raw drafts without calling the LLM:
 
 ```bash
-# External files (PDF/TXT/MD from anywhere)
-bun run raw-ingest --dir ./inbox --tags transformers,attention
-
-# In-place adoption of files Obsidian Web Clipper dropped into 00-raw/
-bun run raw-ingest --adopt --tags transformers
+bun run raw-ingest --dir ./inbox --tags systems,rate-limits
+bun run raw-ingest --adopt --tags clipped,reading
 ```
 
-`raw-ingest` is deterministic and does **not** call the LLM. It writes `00-raw/{slug}.md` with `draft: true`, dedupes by `source_hash`, and merges new tags into existing drafts.
-
-### 2. Compile a topic note from many drafts
+Compile tagged raw drafts into a topic note:
 
 ```bash
-bun run compile --topic "Transformer Architecture" --tags transformers,attention
+bun run compile --topic "Rate Limiting" --tags rate-limits,systems
 ```
 
-This pulls **only** from `00-raw/` files matching the requested tags, synthesizes them into a single `04-topics/{slug}.md` note, adds a `## Sources` section with `[[raw-id|Raw Title]]` wikilinks, and marks each source draft with `compiled_into: [topic-slug]` in its frontmatter. Re-running the command refines the existing topic note instead of overwriting it (pass `--overwrite` to start from scratch).
-
-### 3. Auto-maintained global index
-
-Every time you generate, refine, or compile, `index.md` at the vault root is rebuilt deterministically:
-
-- Topics and notes grouped by primary tag, alphabetically sorted
-- Raw inbox counter
-- Orphan wikilinks section
-- Optional Dataview block (`INDEX_DATAVIEW=true`)
-
-Rebuild on demand:
+Maintain and inspect the vault:
 
 ```bash
 bun run index
+bun run audit --skip-llm
+bun run link
+bun run lint-vault
+bun run diff --id rate-limiting
+bun run ingest --dir ./inbox --concurrency 3
 ```
 
-### 4. Periodic health check
+## Documentation
+
+- [Documentation index](docs/README.md)
+- [Developer guide](docs/developer-guide.md)
+- [Architecture](docs/architecture.md)
+- [CLI reference](docs/cli-reference.md)
+- [Data model](docs/data-model.md)
+- [Pipelines](docs/pipelines.md)
+
+## Project Structure
+
+```text
+knowledge-compiler/
+  cli/          command-line entry points
+  config/       environment configuration
+  llm/          OpenAI structured-output client
+  pipelines/    processing, indexing, audit, linking, and vault workflows
+  schemas/      Zod contracts
+  tests/        Bun tests
+  types/        shared TypeScript types
+  utils/        vault, path, cache, logging, pricing, and link helpers
+  docs/         developer documentation
+```
+
+## Testing
+
+Run the full test suite:
 
 ```bash
-bun run audit            # dry run → .audits/{ts}.md
-bun run audit --apply    # also fix orphan casing and add missing Related links
+bun test
 ```
 
-The auditor is split in two phases:
+CI runs the same test command with Bun on pushes and pull requests to `main`.
 
-- **Deterministic**: orphan wikilinks, stale raw drafts (> `AUDIT_STALE_DAYS`, default 14), frontmatter drift, near-duplicate concepts (title match + Jaccard over Key Concepts).
-- **LLM-assisted**: contradictions and missing cross-references between notes that share tags.
+## Status
 
-Reports use Obsidian callouts (`> [!warning]`, `> [!info]`) and actionable `- [ ]` checklists so you can process them inside Obsidian.
+Implemented:
 
-## 🧩 Obsidian compatibility
+- Schema validation with Zod
+- Structured note generation
+- Raw draft ingestion
+- Topic compilation
+- Auto-maintained `index.md`
+- Wikilink and backlink maintenance
+- Version records and diffs
+- Vault health audits
 
-- **Wikilinks**: emitted as `[[slug|Title]]` so they resolve against filenames even when the title differs from the slug. Override via `OBSIDIAN_LINK_STYLE=alias` to emit bare `[[Title]]` and rely on frontmatter aliases instead.
-- **Aliases**: every note gets `aliases: [Title]` so `[[Title]]` always resolves.
-- **Properties panel**: snake_case keys (`created_at`, `source_url`, `source_hash`, `compiled_into`) render natively in Obsidian's Properties UI.
-- **Callouts**: audit reports and the global index use `> [!info]` / `> [!warning]` blocks.
-- **Web Clipper**: point the Obsidian Web Clipper at `00-raw/` and run `bun run raw-ingest --adopt` to retrofit frontmatter without rewriting the body.
+Planned:
 
-### New config keys
+- Full-text search
+- Optional semantic search
 
-Set these in `.env` to tune the loop:
+## Design Philosophy
 
-```bash
-AUDIT_STALE_DAYS=14          # how long a raw can sit before audit flags it
-TOPIC_MAX_SOURCES=40         # safety cap before chunking in compile
-INDEX_AUTO_REBUILD=true      # rebuild index.md after every write
-INDEX_DATAVIEW=false         # include a Dataview codeblock in index.md
-OBSIDIAN_LINK_STYLE=pipe     # pipe | alias
-OPENAI_MODEL_COMPILE=gpt-4o  # optional override — use a stronger model ONLY for `kc compile`
-```
-
-`OPENAI_MODEL_COMPILE` is scoped to the topic compile step only. Other pipelines (URL/PDF ingestion, refine, audit) continue to use `OPENAI_MODEL` (default `gpt-4o-mini`). This lets you pay for depth where it matters and stay cheap elsewhere.
-
----
-
-## 🛣️ Roadmap
-
-- [x] Schema validation with zod
-- [x] Auto-linking between knowledge units
-- [x] Incremental refinement pipeline
-- [x] Version diffing and rollback
-- [x] Tagged `00-raw/` inbox + topic compiler (Karpathy loop)
-- [x] Auto-maintained global `index.md`
-- [x] Health-check auditor (orphans, contradictions, stale raw)
-- [ ] Full-text search
-- [ ] Semantic search (optional)
-
----
-
-## ⚠️ Design Philosophy
-
-This project intentionally avoids:
-
-- Heavy RAG pipelines
-- Vector databases (early stage)
-- Over-engineered abstractions
-
-Focus is on **clarity, determinism, and long-term knowledge quality**.
+Knowledge Compiler intentionally keeps the durable layer simple: Markdown in a local vault, structured metadata in frontmatter, and JSON sidecar records for versions and runs. Vector databases, heavyweight retrieval infrastructure, and complex service orchestration can be added later if they earn their place.
